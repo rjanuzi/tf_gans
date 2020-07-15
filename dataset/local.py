@@ -3,7 +3,7 @@ import pandas as pd
 from PIL import Image
 
 from dataset import DATASET_RAW_IMGS_FOLDER
-from dataset.remote import get_remote_imgs_list, download_img
+from dataset.remote import download_img, get_remote_imgs_list
 
 DATASET_INDEX_PATH = r'%s\dataset_index.csv' % DATASET_RAW_IMGS_FOLDER
 
@@ -119,7 +119,7 @@ def get_img_data(img_name, download_if_need=True):
 def download_all_imgs():
     imgs_downloaded = 0
     dataset_index = read_dataset_index()
-  
+
     for index, row in dataset_index.iterrows():
         if row['downloaded']:
             continue
@@ -131,5 +131,5 @@ def download_all_imgs():
 
         imgs_downloaded += 1
         if imgs_downloaded % 100 == 0:
-            print('%d imgs downloaded' % imgs_downloaded)          
+            print('%d imgs downloaded' % imgs_downloaded)
             __persist_index(dataset_index)
