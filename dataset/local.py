@@ -72,7 +72,11 @@ def generate_dataset_index():
     __persist_index(df)
 
 def read_dataset_index():
-    return pd.read_csv(DATASET_INDEX_PATH, sep=';')
+    try:
+        return pd.read_csv(DATASET_INDEX_PATH, sep=';')
+    except FileNotFoundError:
+        generate_dataset_index()
+        return pd.read_csv(DATASET_INDEX_PATH, sep=';')
 
 def look_local_imgs():
     '''

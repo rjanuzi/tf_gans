@@ -2,7 +2,6 @@ from requests import get
 
 from dataset import DATASET_RAW_IMGS_FOLDER
 
-DATASET_LOCAL_INDEX_PATH = 'dataset/raw/index.json'
 ISIC_API_URL = 'https://isic-archive.com/api/v1/'
 
 def get_remote_imgs_list(list_limit=0, offset=0):
