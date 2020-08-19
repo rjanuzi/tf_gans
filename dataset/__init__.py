@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+DATASET_FOLDER = Path(r'.\dataset')
 DATASET_RAW_IMGS_FOLDER = Path(r'.\dataset\RAW_IMGS')
 
 # Create utility folders if it doesn't exists

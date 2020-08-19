@@ -2,10 +2,13 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from dataset import DATASET_RAW_IMGS_FOLDER
+from dataset import DATASET_FOLDER, DATASET_RAW_IMGS_FOLDER
 from dataset.remote import download_img, get_remote_imgs_list
 
-DATASET_INDEX_PATH = r'%s\dataset_index.csv' % DATASET_RAW_IMGS_FOLDER
+DATASET_INDEX_PATH = r'%s\dataset_index.csv' % DATASET_FOLDER
+TRAINING_DATASET_INDEX_PATH = r'%s\training_dataset_index.csv' % DATASET_FOLDER
+VALIDATION_DATASET_INDEX_PATH = r'%s\validation_dataset_index.csv' % DATASET_FOLDER
+TEST_DATASET_INDEX_PATH = r'%s\test_dataset_index.csv' % DATASET_FOLDER
 
 class NotInitiated(Exception):
     pass
@@ -13,8 +16,8 @@ class NotInitiated(Exception):
 class DownloadError(Exception):
     pass
 
-def __persist_index(index_df):
-    index_df.to_csv(DATASET_INDEX_PATH, sep=';', index=False)
+def __persist_index(index_df, path):
+    index_df.to_csv(path, sep=';', index=False)
 
 def generate_dataset_index():
     temp_data_dict = {
@@ -69,14 +72,14 @@ def generate_dataset_index():
         temp_data_dict['downloaded'] = False 
     
     df = pd.DataFrame(temp_data_dict)
-    __persist_index(df)
+    __persist_index(df, DATASET_INDEX_PATH)
 
-def read_dataset_index():
+def read_dataset_index(path):
     try:
-        return pd.read_csv(DATASET_INDEX_PATH, sep=';')
+        return pd.read_csv(path, sep=';')
     except FileNotFoundError:
         generate_dataset_index()
-        return pd.read_csv(DATASET_INDEX_PATH, sep=';')
+        return pd.read_csv(path, sep=';')
 
 def look_local_imgs():
     '''
@@ -88,11 +91,11 @@ def look_local_imgs():
 
 def get_imgs_names(init_if_need=False):
     try:
-        return read_dataset_index()['name']
+        return read_dataset_index(DATASET_INDEX_PATH)['name']
     except:
         if init_if_need:
             generate_dataset_index()
-            return read_dataset_index()['name']
+            return read_dataset_index(DATASET_INDEX_PATH)['name']
         else:
             raise NotInitiated()
 
@@ -101,7 +104,7 @@ def __read_img_data(img_path):
 
 def get_img_data(img_name, download_if_need=True):
     img_path = r'%s\%s.jpg' % (DATASET_RAW_IMGS_FOLDER, img_name)
-    dataset_index = read_dataset_index()
+    dataset_index = read_dataset_index(DATASET_INDEX_PATH)
     row_index = dataset_index.index[dataset_index['name']==img_name].tolist()
 
     if not len(row_index):
@@ -114,7 +117,7 @@ def get_img_data(img_name, download_if_need=True):
     elif download_if_need:
         if download_img(id=dataset_index.iloc[row_index]['id'], img_name=img_name):
             dataset_index.at[row_index, 'downloaded'] = True
-            __persist_index(dataset_index)
+            __persist_index(dataset_index, DATASET_INDEX_PATH)
             
             return __read_img_data(img_path)
     
@@ -122,7 +125,7 @@ def get_img_data(img_name, download_if_need=True):
 
 def download_all_imgs():
     imgs_downloaded = 0
-    dataset_index = read_dataset_index()
+    dataset_index = read_dataset_index(DATASET_INDEX_PATH)
 
     for index, row in dataset_index.iterrows():
         if row['downloaded']:
@@ -136,4 +139,82 @@ def download_all_imgs():
         imgs_downloaded += 1
         if imgs_downloaded % 100 == 0:
             print('%d imgs downloaded' % imgs_downloaded)
-            __persist_index(dataset_index)
+            __persist_index(dataset_index, DATASET_INDEX_PATH)
+
+def generate_classification_targets():
+    ds = read_dataset_index(DATASET_INDEX_PATH)
+    
+    # Apply the following filters:
+    #   1) Only Demoscopic imgs
+    #   2) Only confirmed benign or malignant
+    #   3) Removed empty diagnosis
+    ds = ds[(ds['img_type'] == 'dermoscopic') & 
+            ((ds['benign_malignant'] == 'benign') | (ds['benign_malignant'] == 'malignant')) &
+            (ds['diagnosis'] != '')]
+
+    # Generate the malignant classification target column
+    ds['is_malignant'] = ds.apply(lambda row: row['benign_malignant'] == 'malignant', axis=1)
+
+    # Generate the melanoma classification target column
+    ds['is_melanoma'] = ds.apply(lambda row: row['diagnosis'] == 'melanoma', axis=1)
+
+    # Generate the malignant_melanoma classification target column
+    ds['is_malignant_melanoma'] = ds.apply(lambda row: (row['benign_malignant'] == 'malignant') and (row['diagnosis'] == 'melanoma'), axis=1)
+
+    return ds
+
+def generate_training_datasets(training_set_proportion=0.8, validation_set_proportion=0.1, target_col='is_malignant_melanoma'):
+    ds = generate_classification_targets()
+
+    ds = ds.reindex(np.random.permutation(ds.index))
+    ds_positives = ds[ds[target_col]]
+    ds_negatives = ds[ds[target_col] != True]
+
+    training_ds = pd.DataFrame()
+    validation_ds = pd.DataFrame()
+    test_ds = pd.DataFrame()
+
+    # Add positives to datasets
+    training_idx = int(len(ds_positives.index)*training_set_proportion)
+    validation_idx = int(len(ds_positives.index)*validation_set_proportion)+training_idx
+
+    training_ds = training_ds.append(other=ds_positives[:training_idx], verify_integrity=True)
+    validation_ds = validation_ds.append(other=ds_positives[training_idx:validation_idx], verify_integrity=True)
+    test_ds = test_ds.append(other=ds_positives[validation_idx:], verify_integrity=True)
+
+    # Add negatives to datasets
+    training_idx = int(len(ds_negatives.index)*training_set_proportion)
+    validation_idx = int(len(ds_negatives.index)*validation_set_proportion)+training_idx
+
+    training_ds = training_ds.append(other=ds_negatives[:training_idx], verify_integrity=True)
+    validation_ds = validation_ds.append(other=ds_negatives[training_idx:validation_idx], verify_integrity=True)
+    test_ds = test_ds.append(other=ds_negatives[validation_idx:], verify_integrity=True)
+
+    __persist_index(index_df=training_ds.reindex(np.random.permutation(training_ds.index)), path=TRAINING_DATASET_INDEX_PATH)
+    __persist_index(index_df=validation_ds.reindex(np.random.permutation(validation_ds.index)), path=VALIDATION_DATASET_INDEX_PATH)
+    __persist_index(index_df=test_ds.reindex(np.random.permutation(test_ds.index)), path=TEST_DATASET_INDEX_PATH)
+
+def __get_dataset_pairs(index_df, target_col, batch_size):
+    last_idx = 0
+    for batch_idx in range(batch_size, len(index_df.index), batch_size):
+        imgs = []
+        sliced_df = index_df[last_idx:batch_idx]
+        for img_name in sliced_df['name']:
+            imgs.append(get_img_data(img_name))
+        
+        # Update the lower bound slice
+        last_idx = batch_idx
+        
+        yield imgs, sliced_df[target_col]
+
+def get_training_data(target_col='is_malignant_melanoma', batch_size=50):
+    ds = read_dataset_index(TRAINING_DATASET_INDEX_PATH)
+    return __get_dataset_pairs(ds, target_col, batch_size)
+
+def get_validation_data(target_col='is_malignant_melanoma', batch_size=50):
+    ds = read_dataset_index(VALIDATION_DATASET_INDEX_PATH)
+    return __get_dataset_pairs(ds, target_col, batch_size)
+
+def get_test_data(target_col='is_malignant_melanoma', batch_size=50):
+    ds = read_dataset_index(TEST_DATASET_INDEX_PATH)
+    return __get_dataset_pairs(ds, target_col, batch_size)
