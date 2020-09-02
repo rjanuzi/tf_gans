@@ -5,7 +5,7 @@ from PIL import Image
 from dataset import DATASET_FOLDER, DATASET_RAW_IMGS_FOLDER
 from dataset.remote import download_img, get_remote_imgs_list
 
-DATASET_INDEX_PATH = r'%s\dataset_index.csv' % DATASET_FOLDER
+RAW_DATASET_INDEX_PATH = r'%s\dataset_index.csv' % DATASET_FOLDER
 TRAINING_DATASET_INDEX_PATH = r'%s\training_dataset_index.csv' % DATASET_FOLDER
 VALIDATION_DATASET_INDEX_PATH = r'%s\validation_dataset_index.csv' % DATASET_FOLDER
 TEST_DATASET_INDEX_PATH = r'%s\test_dataset_index.csv' % DATASET_FOLDER
@@ -72,9 +72,9 @@ def generate_dataset_index():
         temp_data_dict['downloaded'] = False 
     
     df = pd.DataFrame(temp_data_dict)
-    __persist_index(df, DATASET_INDEX_PATH)
+    __persist_index(df, RAW_DATASET_INDEX_PATH)
 
-def read_dataset_index(path):
+def read_dataset_index(path=RAW_DATASET_INDEX_PATH):
     try:
         return pd.read_csv(path, sep=';')
     except FileNotFoundError:
@@ -91,20 +91,20 @@ def look_local_imgs():
 
 def get_imgs_names(init_if_need=False):
     try:
-        return read_dataset_index(DATASET_INDEX_PATH)['name']
+        return read_dataset_index(RAW_DATASET_INDEX_PATH)['name']
     except:
         if init_if_need:
             generate_dataset_index()
-            return read_dataset_index(DATASET_INDEX_PATH)['name']
+            return read_dataset_index(RAW_DATASET_INDEX_PATH)['name']
         else:
             raise NotInitiated()
 
 def __read_img_data(img_path):
     return np.array(Image.open(img_path))
 
-def get_img_data(img_name, download_if_need=True):
-    img_path = r'%s\%s.jpg' % (DATASET_RAW_IMGS_FOLDER, img_name)
-    dataset_index = read_dataset_index(DATASET_INDEX_PATH)
+def get_img_data(img_name, data_set_folder=DATASET_RAW_IMGS_FOLDER, download_if_need=True):
+    img_path = r'%s\%s.jpg' % (data_set_folder, img_name)
+    dataset_index = read_dataset_index(RAW_DATASET_INDEX_PATH)
     row_index = dataset_index.index[dataset_index['name']==img_name].tolist()
 
     if not len(row_index):
@@ -117,7 +117,7 @@ def get_img_data(img_name, download_if_need=True):
     elif download_if_need:
         if download_img(id=dataset_index.iloc[row_index]['id'], img_name=img_name):
             dataset_index.at[row_index, 'downloaded'] = True
-            __persist_index(dataset_index, DATASET_INDEX_PATH)
+            __persist_index(dataset_index, RAW_DATASET_INDEX_PATH)
             
             return __read_img_data(img_path)
     
@@ -125,7 +125,7 @@ def get_img_data(img_name, download_if_need=True):
 
 def download_all_imgs():
     imgs_downloaded = 0
-    dataset_index = read_dataset_index(DATASET_INDEX_PATH)
+    dataset_index = read_dataset_index(RAW_DATASET_INDEX_PATH)
 
     for index, row in dataset_index.iterrows():
         if row['downloaded']:
@@ -139,10 +139,10 @@ def download_all_imgs():
         imgs_downloaded += 1
         if imgs_downloaded % 100 == 0:
             print('%d imgs downloaded' % imgs_downloaded)
-            __persist_index(dataset_index, DATASET_INDEX_PATH)
+            __persist_index(dataset_index, RAW_DATASET_INDEX_PATH)
 
 def generate_classification_targets():
-    ds = read_dataset_index(DATASET_INDEX_PATH)
+    ds = read_dataset_index(RAW_DATASET_INDEX_PATH)
     
     # Apply the following filters:
     #   1) Only Demoscopic imgs
