@@ -1,8 +1,11 @@
+from random import shuffle
+
 import numpy as np
 import pandas as pd
 from PIL import Image
 
 from dataset import DATASET_FOLDER, DATASET_RAW_IMGS_FOLDER
+import dataset.image_util as image_util
 from dataset.remote import download_img, get_remote_imgs_list
 
 RAW_DATASET_INDEX_PATH = r'%s\dataset_index.csv' % DATASET_FOLDER
@@ -194,27 +197,50 @@ def generate_training_datasets(training_set_proportion=0.8, validation_set_propo
     __persist_index(index_df=validation_ds.reindex(np.random.permutation(validation_ds.index)), path=VALIDATION_DATASET_INDEX_PATH)
     __persist_index(index_df=test_ds.reindex(np.random.permutation(test_ds.index)), path=TEST_DATASET_INDEX_PATH)
 
-def __get_dataset_pairs(index_df, target_col, batch_size):
+def __get_dataset_pairs(index_df, target_col, batch_size, resize=True, augmentation_list=[]):
     last_idx = 0
     for batch_idx in range(batch_size, len(index_df.index), batch_size):
-        imgs = []
+        data = []
         sliced_df = index_df[last_idx:batch_idx]
-        for img_name in sliced_df['name']:
-            imgs.append(get_img_data(img_name))
+        for _, row in sliced_df.iterrows():
+            if resize:
+                temp_img = image_util.resize(get_img_data(row['name']))
+            else:
+                temp_img = get_img_data(row['name'])
+            
+            data.append(
+                {
+                    'img': temp_img,
+                    'target': row[target_col]
+                }
+            )
+
+            # Execute the augmentation techniques and add the generated img to 'imgs' list
+            # for augmentation in augmentation_list:
+                # TODO
         
         # Update the lower bound slice
         last_idx = batch_idx
-        
-        yield imgs, sliced_df[target_col]
 
-def get_training_data(target_col='is_malignant_melanoma', batch_size=50):
+        # Shuffle the batch
+        shuffle(data)
+
+        imgs = []
+        targets = []
+        for d in data:
+            imgs.append(d['img'])
+            targets.append(d['target'])
+        
+        yield imgs, targets
+
+def make_train_generator(target_col='is_malignant_melanoma', batch_size=50):
     ds = read_dataset_index(TRAINING_DATASET_INDEX_PATH)
     return __get_dataset_pairs(ds, target_col, batch_size)
 
-def get_validation_data(target_col='is_malignant_melanoma', batch_size=50):
+def make_validation_generator(target_col='is_malignant_melanoma', batch_size=50):
     ds = read_dataset_index(VALIDATION_DATASET_INDEX_PATH)
     return __get_dataset_pairs(ds, target_col, batch_size)
 
-def get_test_data(target_col='is_malignant_melanoma', batch_size=50):
+def make_test_generator(target_col='is_malignant_melanoma', batch_size=50):
     ds = read_dataset_index(TEST_DATASET_INDEX_PATH)
     return __get_dataset_pairs(ds, target_col, batch_size)
