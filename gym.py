@@ -4,7 +4,7 @@
 from dataset.local import make_train_generator
 from models.basic_cnn import BasicCNN
 
-BATCH_SIZE = 2000
+BATCH_SIZE = 1500
 MAX_DATASET_LOOPS = 1
 
 NEW_WIDTH = 150

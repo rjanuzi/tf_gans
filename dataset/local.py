@@ -251,7 +251,7 @@ def make_train_generator(target_col='is_malignant_melanoma', batch_size=50,
 
     # TODO - Execute a data augmentation in the dataset (adding extra information when we need to execute some operation before provide the img)
 
-    return __get_dataset_pairs(ds, target_col, batch_size, max_dataset_loops)
+    return __get_dataset_pairs(ds, target_col, batch_size, resize_params, max_dataset_loops)
 
 def make_validation_generator(target_col='is_malignant_melanoma', batch_size=50):
     ds = read_dataset_index(VALIDATION_DATASET_INDEX_PATH)
