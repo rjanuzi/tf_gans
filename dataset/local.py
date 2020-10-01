@@ -110,7 +110,7 @@ def __read_img_data(img_path, resize_params):
 
     # TODO - Add the other operations here
 
-    return np.array(img, dtype='float32')
+    return np.array(img, dtype='float32')/255.
 
 def get_img_data(img_name, data_set_folder=DATASET_RAW_IMGS_FOLDER, download_if_need=True, resize_params=None):
     img_path = r'%s\%s.jpg' % (data_set_folder, img_name)
