@@ -1,11 +1,11 @@
 import traceback
+from multiprocessing.dummy import Pool
 from random import shuffle
 
 import numpy as np
 import pandas as pd
 from PIL import Image
 
-import dataset.image_util as image_util
 from dataset import DATASET_FOLDER, DATASET_RAW_IMGS_FOLDER
 from dataset.remote import download_img, get_remote_imgs_list
 
@@ -13,10 +13,6 @@ RAW_DATASET_INDEX_PATH = r'%s\dataset_index.csv' % DATASET_FOLDER
 TRAINING_DATASET_INDEX_PATH = r'%s\training_dataset_index.csv' % DATASET_FOLDER
 VALIDATION_DATASET_INDEX_PATH = r'%s\validation_dataset_index.csv' % DATASET_FOLDER
 TEST_DATASET_INDEX_PATH = r'%s\test_dataset_index.csv' % DATASET_FOLDER
-
-NEW_WIDTH = 150
-NEW_HEIGHT = 112
-MAX_DATASET_LOOPS = 3
 
 class NotInitiated(Exception):
     pass
@@ -107,10 +103,16 @@ def get_imgs_names(init_if_need=False):
         else:
             raise NotInitiated()
 
-def __read_img_data(img_path):
-    return np.array(Image.open(img_path))
+def __read_img_data(img_path, resize_params):
+    img = Image.open(img_path)
+    if resize_params:
+        img = img.resize(size=(resize_params['new_width'], resize_params['new_height']))
 
-def get_img_data(img_name, data_set_folder=DATASET_RAW_IMGS_FOLDER, download_if_need=True):
+    # TODO - Add the other operations here
+
+    return np.array(img, dtype='float32')
+
+def get_img_data(img_name, data_set_folder=DATASET_RAW_IMGS_FOLDER, download_if_need=True, resize_params=None):
     img_path = r'%s\%s.jpg' % (data_set_folder, img_name)
     dataset_index = read_dataset_index(RAW_DATASET_INDEX_PATH)
     row_index = dataset_index.index[dataset_index['name']==img_name].tolist()
@@ -122,19 +124,19 @@ def get_img_data(img_name, data_set_folder=DATASET_RAW_IMGS_FOLDER, download_if_
 
     if dataset_index.iloc[row_index]['downloaded']:
         try:
-            return __read_img_data(img_path)
+            return __read_img_data(img_path, resize_params)
         except:
             print(traceback.format_exc())
             print('Downloading %s again...' % img_name)
             if download_img(id=dataset_index.iloc[row_index]['id'], img_name=img_name):         
-                return __read_img_data(img_path)
+                return __read_img_data(img_path, resize_params)
 
     elif download_if_need:
         if download_img(id=dataset_index.iloc[row_index]['id'], img_name=img_name):
             dataset_index.at[row_index, 'downloaded'] = True
             __persist_index(dataset_index, RAW_DATASET_INDEX_PATH)
             
-            return __read_img_data(img_path)
+            return __read_img_data(img_path, resize_params)
     
     return None
 
@@ -209,40 +211,47 @@ def generate_training_datasets(training_set_proportion=0.8, validation_set_propo
     __persist_index(index_df=validation_ds.reindex(np.random.permutation(validation_ds.index)), path=VALIDATION_DATASET_INDEX_PATH)
     __persist_index(index_df=test_ds.reindex(np.random.permutation(test_ds.index)), path=TEST_DATASET_INDEX_PATH)
 
-def __get_dataset_pairs(index_df, target_col, batch_size, resize=True):
+def __get_dataset_pairs(index_df, target_col, batch_size, resize_params, max_dataset_loops):
+    def load_tuples(row):
+        row = row[1] # Ignoring dataframe idx
+        temp_img = get_img_data(img_name=row['name'], resize_params=resize_params)
+        
+        return temp_img, (1 if row[target_col] else 0)
 
     # Provide (imgs, targets), shuffling after a loop over all the data
     dataset_loops = 0
-    while dataset_loops < MAX_DATASET_LOOPS:
+    while dataset_loops < max_dataset_loops:
         index_df = index_df.reindex(np.random.permutation(index_df.index))
 
         last_idx = 0
         for batch_idx in range(batch_size, len(index_df.index), batch_size):
-            imgs = []
-            targets = []
             sliced_df = index_df[last_idx:batch_idx]
-            for _, row in sliced_df.iterrows():
-                if resize:
-                    temp_img = image_util.resize(get_img_data(row['name']), new_width=600, new_height=450)
-                else:
-                    temp_img = get_img_data(row['name'])
-                
-                imgs.append(temp_img)
-                targets.append(1 if row[target_col] else 0)
+            
+            batch_data = None
+            with Pool() as pool:
+                batch_data = pool.map(load_tuples, sliced_df.iterrows())
             
             # Update the lower bound slice
             last_idx = batch_idx
+
+            # Generate the X and y lists
+            X, y = [], []
+            for img, target in batch_data:
+                X.append(img)
+                y.append(target)
             
-            yield (np.array(imgs, dtype='float32'), np.array(targets, dtype='float32'))
+            yield (np.array(X, dtype='float32'), np.array(y, dtype='float32'))
         
         dataset_loops += 1
 
-def make_train_generator(target_col='is_malignant_melanoma', batch_size=50):
+def make_train_generator(target_col='is_malignant_melanoma', batch_size=50,
+                        resize_params={'new_width': 200, 'new_height': 200},
+                        max_dataset_loops=1):
     ds = read_dataset_index(TRAINING_DATASET_INDEX_PATH)
 
     # TODO - Execute a data augmentation in the dataset (adding extra information when we need to execute some operation before provide the img)
 
-    return __get_dataset_pairs(ds, target_col, batch_size)
+    return __get_dataset_pairs(ds, target_col, batch_size, max_dataset_loops)
 
 def make_validation_generator(target_col='is_malignant_melanoma', batch_size=50):
     ds = read_dataset_index(VALIDATION_DATASET_INDEX_PATH)

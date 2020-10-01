@@ -23902,6 +23902,6 @@ id;name;img_type;pixels_x;pixels_y;age;sex;body_location;benign_malignant;diagno
 5aaf162711659769136471f0;ISIC_0034316;dermoscopic;600;450;85.0;male;upper extremity;malignant;melanoma;histopathology;True;True
 5aaf162711659769136471fb;ISIC_0034317;dermoscopic;600;450;70.0;female;lower extremity;malignant;melanoma;histopathology;True;True
 5aaf16271165976913647206;ISIC_0034318;dermoscopic;600;450;55.0;male;;;pigmented benign keratosis;histopathology;False;False
-5aaf16271165976913647214;ISIC_0034319;dermoscopic;600;450;30.0;male;;benign;nevus;histopathology;True;False
+5aaf16271165976913647214;ISIC_0034319;dermoscopic;600;450;30.0;male;;benign;nevus;histopathology;True;True
 5aaf16271165976913647223;ISIC_0034320;dermoscopic;600;450;25.0;female;anterior torso;benign;nevus;histopathology;True;True
 5ab2d0441165976819ab1566;ISIC_0036065;clinical;2880;1800;80.0;male;;malignant;melanoma;histopathology;True;False

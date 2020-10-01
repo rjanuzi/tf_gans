@@ -11,15 +11,15 @@ class BasicCNN(models.Sequential):
         self.classes_count = classes_count
 
         # CNN layers
-        self.conv_1 = layers.Conv2D(64, (3, 3), activation='relu', input_shape=input_size)
+        self.conv_1 = layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_size)
         self.max_pool_1 = layers.MaxPooling2D((2, 2))
-        self.conv_2 = layers.Conv2D(128, (3, 3), activation='relu')
+        self.conv_2 = layers.Conv2D(64, (3, 3), activation='relu')
         self.max_pool_2 = layers.MaxPooling2D((2, 2))
-        self.conv_3 = layers.Conv2D(128, (3, 3), activation='relu')
+        self.conv_3 = layers.Conv2D(64, (3, 3), activation='relu')
 
         # Classification layers
         self.flatten = layers.Flatten()
-        self.dense_1 = layers.Dense(128, activation='relu')
+        self.dense_1 = layers.Dense(64, activation='relu')
         self.classifier = layers.Dense(classes_count, activation='sigmoid')
 
         # Compile
