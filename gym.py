@@ -4,9 +4,8 @@
 from dataset.local import make_train_generator
 from models.basic_cnn import BasicCNN
 
-BATCH_SIZE = 5000
-MAX_DATASET_LOOPS = 1
-
+BATCH_SIZE = 7000
+MAX_DATASET_LOOPS = 3
 NEW_WIDTH = 150
 NEW_HEIGHT = 112
 
@@ -30,7 +29,12 @@ def train(model):
         
         model.fit(X, y, epochs=30)
 
+        model.save('saved_models/basic_cnn')
+
         print(total_imgs, loops)
+
+        del X
+        del y
 
 def test(model):
     raise Exception('Not implemented yet')
