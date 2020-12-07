@@ -1,0 +1,3 @@
+[submodule "progressive_growing_of_gans"]
+	path = progressive_growing_of_gans
+	url = https://github.com/tkarras/progressive_growing_of_gans.git
