@@ -1,15 +1,30 @@
+from math import log
+
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import activations, layers, models
 
-def discriminator_loss(a, b):
-    # TODO
-    return 0
 
-def generator_loss(a, b):
+def discriminator_loss(real_img_inference, fake_inference):
     # TODO
-    return 0
+    # # D(x) = Inference for the real image x
+    # # D(G(z)) = Inference for the fake image G(z), where z is the Generator's input noise
+
+    # # loss = log D(x) + (1 - log D(G(z)))
+    # return log(real_img_inference, 10) + (1 - log(fake_inference, 10))
+
+    cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+    real_loss = cross_entropy(tf.ones_like(real_img_inference), real_img_inference)
+    fake_loss = cross_entropy(tf.zeros_like(fake_inference), fake_inference)
+    total_loss = real_loss + fake_loss
+    
+    return total_loss
+
+def generator_loss(fake_inference):
+    # TODO
+    cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+    return cross_entropy(tf.ones_like(fake_inference), fake_inference)
 
 class Generator(models.Sequential):
     def __init__(self):
@@ -196,6 +211,9 @@ class ProGAN:
         return random_img
     
     def grow(self):
+        '''
+        Add a new block to generator and discriminator
+        '''
         self.G.add_block()
         self.D.add_block()
     
@@ -211,8 +229,8 @@ class ProGAN:
 
     def discriminate(self, img_input):
         return self.D(img_input)
-    
-    def step(self, real_img, Z, show=False):
+
+    def step(self, real_img, Z, show=True):
         '''
         Executes GAN-like step:
             1) Generate a fake img.
