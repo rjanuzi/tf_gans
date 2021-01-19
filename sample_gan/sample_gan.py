@@ -117,7 +117,7 @@ gan.compile(
 
 # To limit the execution time, we only train on 100 batches. You can train on
 # the entire dataset. You will need about 20 epochs to get nice results.
-gan.fit(dataset.take(100), epochs=20)
+gan.fit(dataset, epochs=100)
 
 # Generate some images with the trained GAN
 samples = tf.random.normal(shape=(9, latent_dim))
