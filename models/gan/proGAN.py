@@ -1,222 +1,408 @@
+import math
+
 import tensorflow as tf
-from tensorflow.keras import Model, layers, models
+from tensorflow.keras import Model, backend, layers, models
 
-# def G_wgan_acgan(G, D, opt, training_set, minibatch_size,
-#     cond_weight = 1.0): # Weight of the conditioning term.
 
-#     latents = tf.random_normal([minibatch_size] + G.input_shapes[0][1:])
-#     labels = training_set.get_random_labels_tf(minibatch_size)
-#     fake_images_out = G.get_output_for(latents, labels, is_training=True)
-#     fake_scores_out, fake_labels_out = fp32(D.get_output_for(fake_images_out, is_training=True))
-#     loss = -fake_scores_out
+def wasserstein_loss(y_true, y_pred):
+    return backend.mean(y_true * y_pred)
 
-#     if D.output_shapes[1][1] > 0:
-#         with tf.name_scope('LabelPenalty'):
-#             label_penalty_fakes = tf.nn.softmax_cross_entropy_with_logits_v2(labels=labels, logits=fake_labels_out)
-#         loss += label_penalty_fakes * cond_weight
-#     return loss
 
-# #----------------------------------------------------------------------------
-# # Discriminator loss function used in the paper (WGAN-GP + AC-GAN).
+def number_of_filters(blocks, fmap_base, fmap_max, fmap_decay):
+    return min(int(fmap_base / (2.0 ** (blocks * fmap_decay))), fmap_max)
 
-# def D_wgangp_acgan(G, D, opt, training_set, minibatch_size, reals, labels,
-#     wgan_lambda     = 10.0,     # Weight for the gradient penalty term.
-#     wgan_epsilon    = 0.001,    # Weight for the epsilon term, \epsilon_{drift}.
-#     wgan_target     = 1.0,      # Target value for gradient magnitudes.
-#     cond_weight     = 1.0):     # Weight of the conditioning terms.
-
-#     latents = tf.random_normal([minibatch_size] + G.input_shapes[0][1:])
-#     fake_images_out = G.get_output_for(latents, labels, is_training=True)
-#     real_scores_out, real_labels_out = fp32(D.get_output_for(reals, is_training=True))
-#     fake_scores_out, fake_labels_out = fp32(D.get_output_for(fake_images_out, is_training=True))
-#     real_scores_out = tfutil.autosummary('Loss/real_scores', real_scores_out)
-#     fake_scores_out = tfutil.autosummary('Loss/fake_scores', fake_scores_out)
-#     loss = fake_scores_out - real_scores_out
-
-#     with tf.name_scope('GradientPenalty'):
-#         mixing_factors = tf.random_uniform([minibatch_size, 1, 1, 1], 0.0, 1.0, dtype=fake_images_out.dtype)
-#         mixed_images_out = tfutil.lerp(tf.cast(reals, fake_images_out.dtype), fake_images_out, mixing_factors)
-#         mixed_scores_out, mixed_labels_out = fp32(D.get_output_for(mixed_images_out, is_training=True))
-#         mixed_scores_out = tfutil.autosummary('Loss/mixed_scores', mixed_scores_out)
-#         mixed_loss = opt.apply_loss_scaling(tf.reduce_sum(mixed_scores_out))
-#         mixed_grads = opt.undo_loss_scaling(fp32(tf.gradients(mixed_loss, [mixed_images_out])[0]))
-#         mixed_norms = tf.sqrt(tf.reduce_sum(tf.square(mixed_grads), axis=[1,2,3]))
-#         mixed_norms = tfutil.autosummary('Loss/mixed_norms', mixed_norms)
-#         gradient_penalty = tf.square(mixed_norms - wgan_target)
-#     loss += gradient_penalty * (wgan_lambda / (wgan_target**2))
-
-#     with tf.name_scope('EpsilonPenalty'):
-#         epsilon_penalty = tfutil.autosummary('Loss/epsilon_penalty', tf.square(real_scores_out))
-#     loss += epsilon_penalty * wgan_epsilon
-
-#     if D.output_shapes[1][1] > 0:
-#         with tf.name_scope('LabelPenalty'):
-#             label_penalty_reals = tf.nn.softmax_cross_entropy_with_logits_v2(labels=labels, logits=real_labels_out)
-#             label_penalty_fakes = tf.nn.softmax_cross_entropy_with_logits_v2(labels=labels, logits=fake_labels_out)
-#             label_penalty_reals = tfutil.autosummary('Loss/label_penalty_reals', label_penalty_reals)
-#             label_penalty_fakes = tfutil.autosummary('Loss/label_penalty_fakes', label_penalty_fakes)
-#         loss += (label_penalty_reals + label_penalty_fakes) * cond_weight
-#     return loss
 
 class Generator(Model):
-    def __init__(self, latent_dim, channels):
+    channels = None
+    fade_in_alpha = 0.0
+    fade_in_block = None
+    layers_sequence = None
+    current_upscale_layer = None
+    current_to_rgb = None
+    new_to_rgb = None
+    fmap_base = None
+    fmap_max = None
+    fmap_decay = None
+
+    def __init__(self, latent_dim, channels, fmap_base, fmap_max, fmap_decay):
         super(Generator, self).__init__()
 
+        self.fmap_base = fmap_base
+        self.fmap_max = fmap_max
+        self.fmap_decay = fmap_decay
+
         # Resolution state
-        self.resolution = 4
+        self.channels = channels
+        self.resolution = 2
+        self.blocks_count = 1
+
+        filters_count = number_of_filters(
+            self.blocks_count,
+            fmap_base=self.fmap_base,
+            fmap_max=self.fmap_max,
+            fmap_decay=self.fmap_decay,
+        )
 
         # Config the first block (Resolution 4 = 4x4)
-        self.reshape_1 = layers.Reshape(target_shape=(4, 4, channels), input_shape=(latent_dim,))
-        self.pixel_norm_1 = layers.LayerNormalization(axis=1)
-        self.dense_1 = layers.Dense(units=16, activation='linear')
-        self.leaky_relu_1 = layers.LeakyReLU()
-        self.pixel_norm_2 = layers.LayerNormalization(axis=1)
-        self.conv_1 = layers.Conv2D(filters=256, kernel_size=3, strides=1, padding='same')
-        self.leaky_relu_2 = layers.LeakyReLU()
-        self.pixel_norm_3 = layers.LayerNormalization(axis=1)
+        self.pixel_norm_0 = layers.LayerNormalization(axis=1, epsilon=1e-8)
+        self.dense_0 = layers.Dense(units=filters_count * 16, activation="linear")
+        self.reshape_1 = layers.Reshape(target_shape=(4, 4, filters_count))
+        self.pixel_norm_1 = layers.LayerNormalization(axis=1, epsilon=1e-8)
+        self.conv_0 = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=3,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
+        )
+        self.pixel_norm_2 = layers.LayerNormalization(axis=1, epsilon=1e-8)
 
         # This layer in not added in the layers_sequence
-        self.to_rgb = layers.Conv2D(filters=channels, kernel_size=1, strides=1, padding='same')
+        self.current_to_rgb = layers.Conv2D(
+            filters=channels,
+            kernel_size=1,
+            strides=1,
+            padding="same",
+            activation="linear",
+            trainable=True,
+        )
 
         # Helper list to the caller
         self.layers_sequence = [
-                                    self.reshape_1,
-                                    self.pixel_norm_1,
-                                    self.dense_1,
-                                    self.leaky_relu_1,
-                                    self.pixel_norm_2,
-                                    self.conv_1,
-                                    self.leaky_relu_2,
-                                    self.pixel_norm_3
-                                ]
+            self.pixel_norm_0,
+            self.dense_0,
+            self.reshape_1,
+            self.pixel_norm_1,
+            self.conv_0,
+            self.pixel_norm_2,
+        ]
 
     def add_block(self):
-        self.resolution *= 2 # Doubles resolution
+        self.resolution *= 2
+        self.blocks_count += 1
 
-        # Simple counter to correctly define layers names
-        try:
-            self.blocks_count += 1
-        except:
-            self.blocks_count = 1
+        # Check if we're in middle of a fade-in process
+        # If yes, we shall add the "new" block to the layers sequence, since a new
+        # one will be generated in this method
+        if self.fade_in_block:
+            self.layers_sequence += (
+                self.fade_in_block
+            )  # Concat new block in the default caller's list
+            self.current_to_rgb = (
+                self.new_to_rgb
+            )  # Replace the old to-rgb to with the new one
+
+        # This indicates to the "call" method that we're in a fade-in process
+        self.fade_in_block = []  # Helper calling list to fade-in
+        self.fade_in_alpha = 0.0
+
+        # Calculate filtes count
+        filters_count = number_of_filters(
+            self.blocks_count,
+            fmap_base=self.fmap_base,
+            fmap_max=self.fmap_max,
+            fmap_decay=self.fmap_decay,
+        )
 
         # 1) Add upscale layer
-        new_layer_name = 'upscale_block_%d_1' % self.blocks_count
-        new_layer = layers.UpSampling2D(interpolation='nearest')
+        new_layer_name = "upscale_block_%d_1" % self.blocks_count
+        new_layer = layers.UpSampling2D(interpolation="nearest", trainable=False)
         self.__dict__[new_layer_name] = new_layer
-        self.layers_sequence.append(new_layer)
+        self.fade_in_block.append(new_layer)
+        self.current_upscale_layer = new_layer  # Let's save the current upscale layer to use in the fade-in process.
 
         # 2) Add convolutional layer
-        new_layer_name = 'conv_%d_1' % self.blocks_count
-        new_layer = layers.Conv2D(filters=256, kernel_size=3, strides=1, padding='same')
+        new_layer_name = "conv_%d_1" % self.blocks_count
+        new_layer = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=3,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
+        )
         self.__dict__[new_layer_name] = new_layer
-        self.layers_sequence.append(new_layer)
+        self.fade_in_block.append(new_layer)
 
-        # 3) Add Leaky ReLU layer
-        new_layer_name = 'leaky_relu_%d_1' % self.blocks_count
-        new_layer = layers.LeakyReLU()
-        self.__dict__[new_layer_name] = new_layer
-        self.layers_sequence.append(new_layer)
-
-        # 4) Add Pixel Normalization
-        new_layer_name = 'pixel_norm_%d_1' % self.blocks_count
+        # 3) Add Pixel Normalization
+        new_layer_name = "pixel_norm_%d_1" % self.blocks_count
         new_layer = layers.LayerNormalization(axis=1)
         self.__dict__[new_layer_name] = new_layer
-        self.layers_sequence.append(new_layer)
+        self.fade_in_block.append(new_layer)
 
-        # 5) Add convolutional layer
-        new_layer_name = 'conv_%d_2' % self.blocks_count
-        new_layer = layers.Conv2D(filters=256, kernel_size=3, strides=1, padding='same')
+        # 4) Add convolutional layer
+        new_layer_name = "conv_%d_2" % self.blocks_count
+        new_layer = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=3,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
+        )
         self.__dict__[new_layer_name] = new_layer
-        self.layers_sequence.append(new_layer)
+        self.fade_in_block.append(new_layer)
 
-        # 6) Add Leaky ReLU layer
-        new_layer_name = 'leaky_relu_%d_2' % self.blocks_count
-        new_layer = layers.LeakyReLU()
-        self.__dict__[new_layer_name] = new_layer
-        self.layers_sequence.append(new_layer)
-
-        # 7) Add Pixel Normalization
-        new_layer_name = 'pixel_norm_%d_2' % self.blocks_count
+        # 5) Add Pixel Normalization
+        new_layer_name = "pixel_norm_%d_2" % self.blocks_count
         new_layer = layers.LayerNormalization(axis=1)
         self.__dict__[new_layer_name] = new_layer
-        self.layers_sequence.append(new_layer)
+        self.fade_in_block.append(new_layer)
 
-        # New to RGB layer
-        # self.to_rgb = layers.Conv2D(filters=3, kernel_size=1, strides=1, padding='same')
+        # 6) New To-RGB layer. Not added to the "block sequence"
+        self.new_to_rgb = layers.Conv2D(
+            filters=self.channels,
+            kernel_size=1,
+            strides=1,
+            padding="same",
+            activation="linear",
+            trainable=True,
+        )
 
     def call(self, inputs):
+
+        # Check if the fade-in of a new block was completed
+        if self.fade_in_alpha >= 1.0 and self.fade_in_block:
+            self.layers_sequence += (
+                self.fade_in_block
+            )  # Concat new block in the default caller's list
+            self.current_to_rgb = (
+                self.new_to_rgb
+            )  # Replace the old to-rgb to with the new one
+            self.fade_in_block = []
+
         # Foward data through all layers
         x = self.layers_sequence[0](inputs)
-        for idx in range(1, len(self.layers_sequence), 1):
-            x = self.layers_sequence[idx](x)
-        return self.to_rgb(x)
+        for tmp_layer in self.layers_sequence[1:]:
+            x = tmp_layer(x)
+
+        # If we don't have a block being faded-in, just call the list
+        if not self.fade_in_block:
+            return self.current_to_rgb(x)  # Just generate the output image
+        else:  # Fade-in ocurring
+
+            # Pass through the new block
+            x_new_block = self.fade_in_block[0](x)
+            for tmp_layer in self.fade_in_block[1:]:
+                x_new_block = tmp_layer(x_new_block)
+
+            # Generate the output to the new block
+            x_new_block = self.new_to_rgb(x_new_block)
+
+            # Generate the output to the old block (using the old to_rgb and upscale layers)
+            x_last_block = self.current_to_rgb(x)
+            x_last_block = self.current_upscale_layer(x_last_block)
+
+            # (new_result * alpha) + (last_result * (1-alpha))
+            return (x_new_block * self.fade_in_alpha) + (
+                x_last_block * (1.0 - self.fade_in_alpha)
+            )
+
 
 class Discriminator(Model):
-    def __init__(self):
+    fade_in_alpha = 0.0
+    fade_in_block = None
+    discriminator_block = None
+    layers_sequence = None
+    new_downscale_layer = None
+    current_from_rgb = None
+    new_from_rgb = None
+    fmap_base = None
+    fmap_max = None
+    fmap_decay = None
+
+    def __init__(self, use_minibatch_norm, fmap_base, fmap_max, fmap_decay):
         super(Discriminator, self).__init__()
+
+        self.fmap_base = fmap_base
+        self.fmap_max = fmap_max
+        self.fmap_decay = fmap_decay
+
+        self.use_minibatch_norm = use_minibatch_norm
 
         # Resolution state
         self.resolution = 4
+        self.blocks_count = 1
+
+        # Calc the number of filters for the layers
+        filters_count = number_of_filters(
+            self.blocks_count,
+            fmap_base=self.fmap_base,
+            fmap_max=self.fmap_max,
+            fmap_decay=self.fmap_decay,
+        )
+
+        # Save the lowest block simplify the fade-in process
+        self.discriminator_block = []
 
         # This layer in not added in the layers_sequence
-        self.from_rgb = layers.Conv2D(filters=256, kernel_size=1, strides=1, padding='same')
-        self.leaky_relu_0 = layers.LeakyReLU()
+        self.current_from_rgb = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=1,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
+            trainable=True,
+        )
 
-        # Config the first block (Resolution 4 = 4x4)
-        self.batch_norm = layers.BatchNormalization(trainable=False, virtual_batch_size=4) # Minibatch Standard Deviation Layers (TODO check this layer)
-        self.conv_1 = layers.Conv2D(filters=256, kernel_size=3, strides=1, padding='same')
-        self.leaky_relu_1 = layers.LeakyReLU()
-        self.dense_1 = layers.Dense(units=16, activation='linear')
-        self.leaky_relu_2 = layers.LeakyReLU()
+        if self.use_minibatch_norm:
+            # TODO - How to add this?
+            self.batch_norm = layers.BatchNormalization(
+                trainable=False, virtual_batch_size=4
+            )
+
+        filters_count = number_of_filters(
+            self.blocks_count,
+            fmap_base=self.fmap_base,
+            fmap_max=self.fmap_max,
+            fmap_decay=self.fmap_decay,
+        )
+        self.conv_1 = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=3,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
+        )
+        self.dense_1 = layers.Dense(
+            units=filters_count, activation=layers.LeakyReLU(alpha=0.2)
+        )
         self.output_faltten = layers.Flatten()
-        self.dense_2 = layers.Dense(units=1, activation='softmax') # Output layer
+        self.dense_2 = layers.Dense(units=1)  # Output layer
+
+        # This block is static
+        self.discriminator_block = [
+            self.conv_1,
+            self.dense_1,
+            self.output_faltten,
+            self.dense_2,
+        ]
 
         # Helper list to the caller
-        self.layers_sequence = [
-                                    self.conv_1,
-                                    self.leaky_relu_1,
-                                    self.dense_1,
-                                    self.leaky_relu_2,
-                                    self.output_faltten,
-                                    self.dense_2
-                                ]
-    
+        self.layers_sequence = []
+
     def add_block(self):
-        self.resolution *= 2 # Doubles resolution
+        self.resolution *= 2  # Doubles resolution
+        self.blocks_count += 1
 
-        # Simple counter to correctly define layers names
-        try:
-            self.blocks_count += 1
-        except:
-            self.blocks_count = 1
+        # Check if we're in middle of a fade-in process
+        # If yes, we shall add the "new" block to the layers sequence, since a new
+        # one will be generated in this method
+        if self.fade_in_block:
+            self.layers_sequence = (
+                self.fade_in_block + self.layers_sequence
+            )  # Concat new block in the default caller's list
+            self.current_from_rgb = self.new_from_rgb
 
-        # 1) Add downscale layer
-        new_layer_name = 'downscale_block_%d_1' % self.blocks_count
-        new_layer = layers.AveragePooling2D(pool_size=(2,2), strides=(2,2), padding='same')
+        # This indicates to the "call" method that we're in a fade-in process
+        self.fade_in_block = []  # Helper calling list to fade-in
+        self.fade_in_alpha = 0.0
+
+        # Calc the number of filters for the layers
+        filters_count = number_of_filters(
+            self.blocks_count,
+            fmap_base=self.fmap_base,
+            fmap_max=self.fmap_max,
+            fmap_decay=self.fmap_decay,
+        )
+
+        # This layer in not added in the layers_sequence
+        self.new_from_rgb = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=1,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
+            trainable=True,
+        )
+
+        # 1) Conv2D
+        new_layer_name = "conv_%d_0" % self.blocks_count
+        new_layer = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=3,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
+        )
         self.__dict__[new_layer_name] = new_layer
-        self.layers_sequence = [new_layer] + self.layers_sequence
+        self.fade_in_block = self.fade_in_block + [new_layer]
 
-        # 2) Add 2 pairs of Conv2D -> Leaky Relu
-        for _ in range(2):
-            # Leaky Relu first
-            new_layer_name = 'leaky_relu_%d_1' % self.blocks_count
-            new_layer = layers.LeakyReLU()
-            self.__dict__[new_layer_name] = new_layer
-            self.layers_sequence = [new_layer] + self.layers_sequence
+        # 2) Conv2D
+        # We need to match the filters count of this layer (fitlers count of the output of the new block)
+        # with the filters count expected for the "from-rgb" layer of the current block, since
+        # we need to fade-in this one as input of the current block
+        filters_count = number_of_filters(
+            self.blocks_count - 1,
+            fmap_base=self.fmap_base,
+            fmap_max=self.fmap_max,
+            fmap_decay=self.fmap_decay,
+        )
+        new_layer_name = "conv_%d_1" % self.blocks_count
+        new_layer = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=3,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
+        )
+        self.__dict__[new_layer_name] = new_layer
+        self.fade_in_block = self.fade_in_block + [new_layer]
 
-            # Then Conv2D
-            new_layer_name = 'conv_%d_1' % self.blocks_count
-            new_layer = layers.Conv2D(filters=256, kernel_size=3, strides=1, padding='same')
-            self.__dict__[new_layer_name] = new_layer
-            self.layers_sequence = [new_layer] + self.layers_sequence
+        # 3) Add downscale layer
+        new_layer_name = "downscale_block_%d_0" % self.blocks_count
+        new_layer = layers.AveragePooling2D(
+            pool_size=(2, 2), strides=(2, 2), padding="same", trainable=False
+        )
+        self.__dict__[new_layer_name] = new_layer
+        self.fade_in_block = self.fade_in_block + [new_layer]
+        self.new_downscale_layer = (
+            new_layer  # Easy access to this layer in order to do the fade-in
+        )
 
     def call(self, img_input):
-        # Foward data through all layers
-        x = self.from_rgb(img_input)
-        x = self.leaky_relu_0(x)
-        for idx in range(0, len(self.layers_sequence)-1, 1):
-            x = self.layers_sequence[idx](x)
-        return self.layers_sequence[-1](x)
+        # Check if the fade-in of a new block was completed
+        if self.fade_in_alpha >= 1.0 and self.fade_in_block:
+            self.layers_sequence = (
+                self.fade_in_block + self.layers_sequence
+            )  # Concat new block in the default caller's list
+            self.current_from_rgb = (
+                self.new_from_rgb
+            )  # Replace the old from-RGB layer with the new one
+            self.fade_in_block = []
+
+        # If we're in a fade-in process
+        if self.fade_in_block:
+            # Pass through the new block (The last layer is the new_downscale_layer)
+            x_new_block = self.new_from_rgb(img_input)
+            for tmp_layer in self.fade_in_block:
+                x_new_block = tmp_layer(x_new_block)
+
+            # Generate the input to the last added layer. Basicaly we need to downscale (using the
+            # new downscale layer) and pass trhough the current from-rgb
+            x_last_block = self.new_downscale_layer(
+                img_input
+            )  # Downscale the input img
+            x_last_block = self.current_from_rgb(x_last_block)
+
+            # Generate the effective "x" using the fading-in alpha
+            # (new_result * alpha) + (last_result * (1-alpha))
+            x = (x_new_block * self.fade_in_alpha) + (
+                x_last_block * (1.0 - self.fade_in_alpha)
+            )
+        else:
+            x = self.current_from_rgb(
+                img_input
+            )  # Pass through the currnto from-RGB before continue
+
+        # Pass through the intermediary layers if exist
+        for tmp_layer in self.layers_sequence:
+            x = tmp_layer(x)
+
+        # The final block is different from all others, in order to generate the expected classification shape
+        for tmp_layer in self.discriminator_block:
+            x = tmp_layer(x)
+
+        return x
+
 
 class ProGAN(Model):
     G = None
@@ -225,15 +411,39 @@ class ProGAN(Model):
     disc_optimizer = None
     gen_optimizer = None
     loss_fn = None
+    steps = 0
+    fade_in_alpha = 1.0
+    fading_in_block = False
+    fade_in_increment = None
+    current_output_size = 4
 
-    def __init__(self, latent_dim=48, channels=3):
-        assert 4*4*channels == latent_dim
+    def __init__(
+        self,
+        latent_dim=48,
+        channels=3,
+        use_minibatch_norm=False,
+        fmap_base=8192,
+        fmap_max=512,
+        fmap_decay=1.0,
+    ):
+        # assert 4*4*channels == latent_dim
 
         super(ProGAN, self).__init__()
-        self.G = Generator(latent_dim=latent_dim, channels=channels)
-        self.D = Discriminator()
+        self.G = Generator(
+            latent_dim=latent_dim,
+            channels=channels,
+            fmap_base=fmap_base,
+            fmap_max=fmap_max,
+            fmap_decay=fmap_decay,
+        )
+        self.D = Discriminator(
+            use_minibatch_norm=use_minibatch_norm,
+            fmap_base=fmap_base,
+            fmap_max=fmap_max,
+            fmap_decay=fmap_decay,
+        )
         self.latent_dim = latent_dim
-    
+
     def compile(self, disc_optimizer, gen_optimizer, loss_fn):
         super(ProGAN, self).compile()
         self.disc_optimizer = disc_optimizer
@@ -241,7 +451,7 @@ class ProGAN(Model):
         self.loss_fn = loss_fn
 
     def train_step(self, real_images):
-        '''
+        """
         The training step is:
             1) Generate images from random noise
             2) Discriminate over the generated images and real images
@@ -251,25 +461,40 @@ class ProGAN(Model):
             6) Discriminate over the generated images
             7) Calculae Generator loss
             8) Update Generator weights
-        '''
+        """
+        # Update fade-in state
+        if self.fading_in_block and self.fade_in_alpha >= 1.0:
+            self.fading_in_block = False
+            self.fade_in_alpha = 1.0
+            self.G.fade_in_alpha = self.fade_in_alpha
+            self.D.fade_in_alpha = self.fade_in_alpha
+
+        elif self.fading_in_block:
+            self.fade_in_alpha += self.fade_in_increment
+            self.G.fade_in_alpha = self.fade_in_alpha
+            self.D.fade_in_alpha = self.fade_in_alpha
 
         # Sample random points in the latent space
         batch_size = tf.shape(real_images)[0]
-        random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
+        random_latent_vectors = tf.random.normal(
+            shape=(batch_size, self.latent_dim), mean=0, stddev=1
+        )
 
         # Decode them to fake images
         generated_images = self.G(random_latent_vectors)
-        
+
         # Combine them with real images
         combined_images = tf.concat([generated_images, real_images], axis=0)
 
         # Assemble labels discriminating real from fake images
         labels = tf.concat(
-            [tf.ones((batch_size, 1)), tf.zeros((batch_size, 1))], axis=0
+            [tf.ones((batch_size, 1)), tf.zeros((batch_size, 1))],
+            axis=0
+            # [tf.ones((batch_size, 1)), tf.ones((batch_size, 1))*(-1)], axis=0
         )
-        
+
         # Add random noise to the labels - important trick!
-        labels += 0.05 * tf.random.uniform(tf.shape(labels))
+        # labels += 0.05 * tf.random.uniform(tf.shape(labels))
 
         # Train the discriminator
         with tf.GradientTape() as tape:
@@ -278,105 +503,118 @@ class ProGAN(Model):
         grads = tape.gradient(d_loss, self.D.trainable_weights)
         self.disc_optimizer.apply_gradients(zip(grads, self.D.trainable_weights))
 
+        # Train more the generator than the discriminator
+        # with tf.GradientTape() as tape:
+        #     predictions = self.D(combined_images)
+        #     d_loss = self.loss_fn(labels, predictions)
+        # if self.steps == 2:
+        #     self.steps = 0
+        #     grads = tape.gradient(d_loss, self.D.trainable_weights)
+        #     self.disc_optimizer.apply_gradients(zip(grads, self.D.trainable_weights))
+        # else:
+        #     self.steps += 1
+
         # Sample random points in the latent space
-        random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
+        random_latent_vectors = tf.random.normal(
+            shape=(batch_size, self.latent_dim), mean=0, stddev=1
+        )
 
         # Assemble labels that say "all real images"
-        misleading_labels = tf.zeros((batch_size, 1))
+        is_real_labels = tf.zeros((batch_size, 1))
+        # is_real_labels = tf.ones((batch_size, 1))*(-1)
 
-        # Train the generator (note that we should *not* update the weights
-        # of the discriminator)!
+        # Train the generator
         with tf.GradientTape() as tape:
             predictions = self.D(self.G(random_latent_vectors))
-            g_loss = self.loss_fn(misleading_labels, predictions)
+            g_loss = self.loss_fn(is_real_labels, predictions)
         grads = tape.gradient(g_loss, self.G.trainable_weights)
         self.gen_optimizer.apply_gradients(zip(grads, self.G.trainable_weights))
-        
+
+        # Train more the discriminator than the generator
+        # with tf.GradientTape() as tape:
+        #     predictions = self.D(self.G(random_latent_vectors))
+        #     g_loss = self.loss_fn(is_real_labels, predictions)
+        # if self.steps == 10:
+        #     self.steps = 0
+        #     grads = tape.gradient(g_loss, self.G.trainable_weights)
+        #     self.gen_optimizer.apply_gradients(zip(grads, self.G.trainable_weights))
+        # else:
+        #     self.steps += 1
+
         return {"d_loss": d_loss, "g_loss": g_loss}
 
     def grow(self):
-        '''
+        """
         Add a new block to generator and discriminator
-        '''
+        """
         self.G.add_block()
         self.D.add_block()
-    
+        self.fade_in_alpha = 0.0
+        self.fading_in_block = True
+
+    def fit_and_grow(
+        self,
+        dataset,
+        dataset_size,
+        batch_size,
+        target_size,
+        disc_optimizer,
+        gen_optimizer,
+        loss_fn,
+        epochs_to_fade_in=1,
+        epochs_to_stabilize=2,
+        callback_before_grow=None,
+    ):
+        assert target_size >= 4
+        assert math.log(target_size, 2) == int(math.log(target_size, 2))
+
+        # Calculate the increment to accomplish the number of epochs to use as fade-in of a new block
+        self.fade_in_increment = (1 / (dataset_size / batch_size)) * epochs_to_fade_in
+
+        # Determine the total epochs to each training size
+        epochs = epochs_to_fade_in + epochs_to_stabilize
+
+        self.compile(
+            disc_optimizer=disc_optimizer, gen_optimizer=gen_optimizer, loss_fn=loss_fn
+        )
+
+        self.current_output_size = 4  # Start size
+        while True:
+            # Resize dataset the the current network size
+            dataset = dataset.map(
+                lambda img: tf.image.resize(
+                    img, [self.current_output_size, self.current_output_size]
+                )
+            )
+            self.fit(dataset, epochs=epochs)
+
+            if callback_before_grow:
+                callback_before_grow(self)
+
+            # Doubles the output size
+            self.current_output_size *= 2  # Doubles the output size
+            if self.current_output_size > target_size:
+                self.current_output_size = (
+                    target_size  # Set the target size as final output size of the model
+                )
+                break
+
+            # Add layers to Generator and Disciminator
+            self.grow()
+
+            # Re-compile the models to recalculate the execution graph (We  add new layers when grow the network)
+            self.compile(
+                disc_optimizer=disc_optimizer,
+                gen_optimizer=gen_optimizer,
+                loss_fn=loss_fn,
+            )
+
     def generate(self, noises):
         return self.G(noises)
 
     def discriminate(self, img_inputs):
         return self.D(img_inputs)
 
-# MNIST Example
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from tensorflow.keras import datasets, losses, optimizers
-    from datetime import datetime
-
-    tf.config.set_visible_devices([], 'GPU')
-
-    BATCH_SIZE = 32
-    # LATENT_DIM = 48
-    LATENT_DIM = 16
-
-    # Prepare input data
-    (x_train, _), (x_test, _) = datasets.mnist.load_data()
-    all_digits = np.concatenate([x_train, x_test])
-    all_digits = all_digits.astype('float32') / 255.0
-    all_digits = np.reshape(all_digits, (-1, 28, 28, 1))
-    dataset = tf.data.Dataset.from_tensor_slices(all_digits)
-    dataset = dataset.shuffle(buffer_size=1024).batch(BATCH_SIZE)
-
-    # Instantiate and compile GAN
-    proGAN = ProGAN(LATENT_DIM, channels=1) # 4x4   
-    proGAN.compile(
-                    disc_optimizer=optimizers.Adam(learning_rate=0.01),
-                    gen_optimizer=optimizers.Adam(learning_rate=0.01),
-                    loss_fn=losses.BinaryCrossentropy(from_logits=True)
-    )
-
-    # Pro GAN starts with images 4x4
-    # In this step we'll also convert the grayscale (x, y, 1) images to RGB images (x, y, 3) 
-    # dataset = dataset.map(lambda img: tf.image.grayscale_to_rgb(tf.image.resize(img, [4, 4])))
-
-    # TESTING
-    # ==============================================================================================
-    # dataset = dataset.map(lambda img: tf.image.grayscale_to_rgb(tf.image.resize(img, [8, 8])))
-    dataset = dataset.map(lambda img: tf.image.resize(img, [8, 8]))
-    proGAN.grow() # 8x8
-    # proGAN.grow() # 16x16
-    # proGAN.grow() # 32x32
-    
-    # fig, axs = plt.subplots(3, 3)
-    # dataset_ite = dataset.as_numpy_iterator()
-    # for i in range(3):
-    #     for j in range(3):
-    #         img = dataset_ite.__next__()[0]
-    #         # axs[i][j].imshow(img)
-    #         axs[i][j].imshow(img, cmap='gray')
-
-    # fig.show()
-    # ==============================================================================================
-
-    # Train with tensorboard
-    # log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
-    # tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-    # proGAN.fit(dataset, epochs=10, callbacks=[tensorboard_callback])
-
-    # Train without tensorboard
-    proGAN.fit(dataset, epochs=10)
-
-    # Generate some images with the trained GAN
-    samples = tf.random.normal(shape=(9, LATENT_DIM))
-    sample_imgs = proGAN.generate(samples).numpy()
-
-    # Plot generated images
-    fig, axs = plt.subplots(3, 3)
-    tmp_idx = 0
-    for i in range(3):
-        for j in range(3):
-            # axs[i][j].imshow(sample_imgs[tmp_idx])
-            axs[i][j].imshow(sample_imgs[tmp_idx], cmap='gray')
-            tmp_idx += 1
-    fig.show()
+    # def save(self, root_dir):
+    #     self.G.save(root_dir.joinpath('generator'))
+    #     self.D.save(root_dir.joinpath('discriminator'))

@@ -6,8 +6,9 @@ from tensorflow.keras import layers
 
 
 def show_img(img):
-    plt.imshow(img, cmap='gray')
+    plt.imshow(img, cmap="gray")
     plt.show()
+
 
 # Create the discriminator
 discriminator = keras.Sequential(
@@ -18,9 +19,9 @@ discriminator = keras.Sequential(
         layers.Conv2D(128, (3, 3), strides=(2, 2), padding="same"),
         layers.LeakyReLU(alpha=0.2),
         layers.GlobalMaxPooling2D(),
-        layers.Dense(1)
+        layers.Dense(1),
     ],
-    name='discriminator'
+    name="discriminator",
 )
 
 # Create the generator
@@ -32,14 +33,15 @@ generator = keras.Sequential(
         layers.Dense(7 * 7 * 128),
         layers.LeakyReLU(alpha=0.2),
         layers.Reshape((7, 7, 128)),
-        layers.Conv2DTranspose(128, (4, 4), strides=(2,2), padding='same'),
+        layers.Conv2DTranspose(128, (4, 4), strides=(2, 2), padding="same"),
         layers.LeakyReLU(alpha=0.2),
-        layers.Conv2DTranspose(128, (4, 4), strides=(2,2), padding='same'),
+        layers.Conv2DTranspose(128, (4, 4), strides=(2, 2), padding="same"),
         layers.LeakyReLU(alpha=0.2),
-        layers.Conv2D(1, (7, 7), padding='same', activation='sigmoid')
+        layers.Conv2D(1, (7, 7), padding="same", activation="sigmoid"),
     ],
-    name='generator'
+    name="generator",
 )
+
 
 class GAN(keras.Model):
     def __init__(self, discriminator, generator, latent_dim):
@@ -96,39 +98,42 @@ class GAN(keras.Model):
             g_loss = self.loss_fn(misleading_labels, predictions)
         grads = tape.gradient(g_loss, self.generator.trainable_weights)
         self.g_optimizer.apply_gradients(zip(grads, self.generator.trainable_weights))
-        
+
         return {"d_loss": d_loss, "g_loss": g_loss}
 
-# Prepare the dataset. We use both the training & test MNIST digits.
-batch_size = 64
-(x_train, _), (x_test, _) = keras.datasets.mnist.load_data()
-all_digits = np.concatenate([x_train, x_test])
-all_digits = all_digits.astype("float32") / 255.0
-all_digits = np.reshape(all_digits, (-1, 28, 28, 1))
-dataset = tf.data.Dataset.from_tensor_slices(all_digits)
-dataset = dataset.shuffle(buffer_size=1024).batch(batch_size)
 
-gan = GAN(discriminator=discriminator, generator=generator, latent_dim=latent_dim)
-gan.compile(
-    d_optimizer=keras.optimizers.Adam(learning_rate=0.0003),
-    g_optimizer=keras.optimizers.Adam(learning_rate=0.0003),
-    loss_fn=keras.losses.BinaryCrossentropy(from_logits=True),
-)
+# MNIST Example
+if __name__ == "__main__":
+    # Prepare the dataset. We use both the training & test MNIST digits.
+    batch_size = 64
+    (x_train, _), (x_test, _) = keras.datasets.mnist.load_data()
+    all_digits = np.concatenate([x_train, x_test])
+    all_digits = all_digits.astype("float32") / 255.0
+    all_digits = np.reshape(all_digits, (-1, 28, 28, 1))
+    dataset = tf.data.Dataset.from_tensor_slices(all_digits)
+    dataset = dataset.shuffle(buffer_size=1024).batch(batch_size)
 
-# To limit the execution time, we only train on 100 batches. You can train on
-# the entire dataset. You will need about 20 epochs to get nice results.
-gan.fit(dataset, epochs=100)
+    gan = GAN(discriminator=discriminator, generator=generator, latent_dim=latent_dim)
+    gan.compile(
+        d_optimizer=keras.optimizers.Adam(learning_rate=0.0003),
+        g_optimizer=keras.optimizers.Adam(learning_rate=0.0003),
+        loss_fn=keras.losses.BinaryCrossentropy(from_logits=True),
+    )
 
-# Generate some images with the trained GAN
-samples = tf.random.normal(shape=(9, latent_dim))
-sample_imgs = gan.generator(samples)
+    # To limit the execution time, we only train on 100 batches. You can train on
+    # the entire dataset. You will need about 20 epochs to get nice results.
+    gan.fit(dataset, epochs=100)
 
-fig, axs = plt.subplots(3, 3)
+    # Generate some images with the trained GAN
+    samples = tf.random.normal(shape=(9, latent_dim))
+    sample_imgs = gan.generator(samples)
 
-tmp_idx = 0
-for i in range(3):
-    for j in range(3):
-        axs[i][j].imshow(sample_imgs[tmp_idx], cmap='gray')
-        tmp_idx += 1
+    fig, axs = plt.subplots(3, 3)
 
-fig.show()
+    tmp_idx = 0
+    for i in range(3):
+        for j in range(3):
+            axs[i][j].imshow(sample_imgs[tmp_idx], cmap="gray")
+            tmp_idx += 1
+
+    fig.show()
