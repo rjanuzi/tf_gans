@@ -561,8 +561,8 @@ class ProGAN(Model):
         disc_optimizer,
         gen_optimizer,
         loss_fn,
-        epochs_to_fade_in=1,
-        epochs_to_stabilize=2,
+        epochs_to_fade_in,
+        epochs_to_stabilize,
         callback_before_grow=None,
     ):
         assert target_size >= 4

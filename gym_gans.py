@@ -132,8 +132,6 @@ def run_proGAN_experiment(
             learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8
         ),
         loss_fn=losses.BinaryCrossentropy(from_logits=True),
-        # loss_fn=losses.BinaryCrossentropy(from_logits=False),
-        # loss_fn=wasserstein_loss,
         epochs_to_fade_in=epochs_to_fade_in,
         epochs_to_stabilize=epochs_to_stabilize,
         callback_before_grow=before_grow_callback,
