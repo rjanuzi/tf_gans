@@ -83,13 +83,13 @@ def isic_preprocessing(path, normalize=True):
 
 
 def prepare_dataset(
-    dataset_name, batch_size, cache=True, normalize=True, data_limit=None
+    dataset_name, batch_size, cache=True, normalize=True, dataset_limit=None
 ):
     if dataset_name.lower() == "mnist":
         (x_train, _), (x_test, _) = datasets.mnist.load_data()
         all_digits = (
-            np.concatenate([x_train, x_test])[:data_limit]
-            if data_limit
+            np.concatenate([x_train, x_test])[:dataset_limit]
+            if dataset_limit
             else np.concatenate([x_train, x_test])
         )
 
@@ -109,8 +109,8 @@ def prepare_dataset(
 
     elif dataset_name.lower() == "isic":
         files_paths = (
-            get_dataset_imgs_paths()[:data_limit]
-            if data_limit
+            get_dataset_imgs_paths()[:dataset_limit]
+            if dataset_limit
             else get_dataset_imgs_paths()
         )
         ds = tf.data.Dataset.list_files(files_paths)
@@ -142,6 +142,7 @@ def prepare_experiment_results_folder(folder_name):
 
 def run_proGAN_experiment(
     dataset_name,
+    dataset_limit,
     channels,
     batch_size,
     latent_dim,
@@ -227,7 +228,7 @@ def run_proGAN_experiment(
         batch_size=batch_size,
         cache=DATASET_PARAM_CACHE,
         normalize=DATASET_PARAM_NORMALIZE,
-        data_limit=DATASET_IMGS_LIMIT,
+        dataset_limit=dataset_limit,
     )
 
     # Instantiate a fresh new model
@@ -290,6 +291,7 @@ for r in rows:
         # Run an experiment
         results = run_proGAN_experiment(
             dataset_name=get_fld("dataset_name", headers, r),
+            dataset_limit=get_fld("imgs_limit", headers, r),
             channels=get_fld("channels", headers, r),
             batch_size=get_fld("batch_size", headers, r),
             latent_dim=get_fld("latent_dim", headers, r),
