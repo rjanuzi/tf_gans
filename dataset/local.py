@@ -123,13 +123,17 @@ def __read_img_data(img_path, resize_params):
     return np.array(img, dtype="float32") / 255.0
 
 
+def get_img_path(img_name, dataset_folder=DATASET_RAW_IMGS_FOLDER):
+    return r"{}\{}.jpg".format(dataset_folder, img_name)
+
+
 def get_img_data(
     img_name,
     data_set_folder=DATASET_RAW_IMGS_FOLDER,
     download_if_need=True,
     resize_params=None,
 ):
-    img_path = r"%s\%s.jpg" % (data_set_folder, img_name)
+    img_path = get_img_path(img_name, data_set_folder)
     dataset_index = read_dataset_index(RAW_DATASET_INDEX_PATH)
     row_index = dataset_index.index[dataset_index["name"] == img_name].tolist()
 
@@ -326,3 +330,8 @@ def make_validation_generator(target_col="is_malignant_melanoma", batch_size=50)
 def make_test_generator(target_col="is_malignant_melanoma", batch_size=50):
     ds = read_dataset_index(TEST_DATASET_INDEX_PATH)
     return __get_dataset_pairs(ds, target_col, batch_size)
+
+
+def get_dataset_imgs_paths(dataset_index_path=TRAINING_DATASET_INDEX_PATH):
+    ds = read_dataset_index(dataset_index_path)
+    return ds["name"].map(lambda img_name: get_img_path(img_name=img_name)).tolist()

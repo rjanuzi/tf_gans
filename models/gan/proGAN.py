@@ -411,11 +411,12 @@ class ProGAN(Model):
     disc_optimizer = None
     gen_optimizer = None
     loss_fn = None
-    steps = 0
     fade_in_alpha = 1.0
     fading_in_block = False
     fade_in_increment = None
     current_output_size = 4
+    steps = 0
+    skipping_disc_training = True
 
     def __init__(
         self,
@@ -497,22 +498,26 @@ class ProGAN(Model):
         # labels += 0.05 * tf.random.uniform(tf.shape(labels))
 
         # Train the discriminator
-        with tf.GradientTape() as tape:
-            predictions = self.D(combined_images)
-            d_loss = self.loss_fn(labels, predictions)
-        grads = tape.gradient(d_loss, self.D.trainable_weights)
-        self.disc_optimizer.apply_gradients(zip(grads, self.D.trainable_weights))
-
-        # Train more the generator than the discriminator
-        # with tf.GradientTape() as tape:
-        #     predictions = self.D(combined_images)
-        #     d_loss = self.loss_fn(labels, predictions)
-        # if self.steps == 2:
-        #     self.steps = 0
-        #     grads = tape.gradient(d_loss, self.D.trainable_weights)
-        #     self.disc_optimizer.apply_gradients(zip(grads, self.D.trainable_weights))
-        # else:
-        #     self.steps += 1
+        # if tf.constant(not self.skipping_disc_training, dtype=tf.bool):
+        if self.skipping_disc_training:
+            # Train more the generator than the discriminator
+            with tf.GradientTape() as tape:
+                predictions = self.D(combined_images)
+                d_loss = self.loss_fn(labels, predictions)
+            if self.steps >= 2:
+                self.steps = 0
+                grads = tape.gradient(d_loss, self.D.trainable_weights)
+                self.disc_optimizer.apply_gradients(
+                    zip(grads, self.D.trainable_weights)
+                )
+            else:
+                self.steps += 1
+        else:
+            with tf.GradientTape() as tape:
+                predictions = self.D(combined_images)
+                d_loss = self.loss_fn(labels, predictions)
+            grads = tape.gradient(d_loss, self.D.trainable_weights)
+            self.disc_optimizer.apply_gradients(zip(grads, self.D.trainable_weights))
 
         # Sample random points in the latent space
         random_latent_vectors = tf.random.normal(
@@ -581,15 +586,17 @@ class ProGAN(Model):
         self.current_output_size = 4  # Start size
         while True:
             # Resize dataset the the current network size
-            dataset = dataset.map(
+            dataset_resized = dataset.map(
                 lambda img: tf.image.resize(
-                    img, [self.current_output_size, self.current_output_size]
+                    img,
+                    [self.current_output_size, self.current_output_size],
+                    # method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
                 )
             )
-            self.fit(dataset, epochs=epochs)
+            self.fit(dataset_resized, epochs=epochs)
 
             if callback_before_grow:
-                callback_before_grow(self)
+                callback_before_grow(self, dataset_resized.take(5))
 
             # Doubles the output size
             self.current_output_size *= 2  # Doubles the output size

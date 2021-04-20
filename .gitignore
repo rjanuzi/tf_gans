@@ -3,5 +3,5 @@ venv
 saved_models
 logs/*
 *__pycache__
-proGAN_mnist_runs*
-progan_experiments.csv
+proGAN_*_runs*
+progan_experiments*.csv
