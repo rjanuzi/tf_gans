@@ -48,7 +48,7 @@ def generate_dataset_index():
 
     imgs_info = []
     for offset in range(0, 100000, 1000):
-        new_list = get_remote_imgs_list(list_limit=1000, offset=offset - 1)
+        new_list = get_remote_imgs_list(list_limit=1000, offset=offset)
         if not new_list:
             break
         imgs_info += new_list
