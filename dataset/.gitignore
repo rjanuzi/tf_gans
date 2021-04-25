@@ -1,2 +1,6 @@
 __pycache__
 *.jpg
+dataset_index.csv
+test_dataset_index.csv
+training_dataset_index.csv
+validation_dataset_index.csv
