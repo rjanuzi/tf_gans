@@ -9,10 +9,10 @@ from PIL import Image
 from dataset import DATASET_FOLDER, DATASET_RAW_IMGS_FOLDER
 from dataset.remote import download_img, get_remote_imgs_list
 
-RAW_DATASET_INDEX_PATH = r"%s\dataset_index.csv" % DATASET_FOLDER
-TRAINING_DATASET_INDEX_PATH = r"%s\training_dataset_index.csv" % DATASET_FOLDER
-VALIDATION_DATASET_INDEX_PATH = r"%s\validation_dataset_index.csv" % DATASET_FOLDER
-TEST_DATASET_INDEX_PATH = r"%s\test_dataset_index.csv" % DATASET_FOLDER
+RAW_DATASET_INDEX_PATH = r"%s/dataset_index.csv" % DATASET_FOLDER
+TRAINING_DATASET_INDEX_PATH = r"%s/training_dataset_index.csv" % DATASET_FOLDER
+VALIDATION_DATASET_INDEX_PATH = r"%s/validation_dataset_index.csv" % DATASET_FOLDER
+TEST_DATASET_INDEX_PATH = r"%s/test_dataset_index.csv" % DATASET_FOLDER
 
 
 class NotInitiated(Exception):
@@ -43,7 +43,17 @@ def generate_dataset_index():
         "melanocytic": [],
         "downloaded": [],
     }
-    imgs_info = get_remote_imgs_list()
+
+    print("Querying the imgs list from isic-archive.")
+
+    imgs_info = []
+    for offset in range(0, 100000, 1000):
+        new_list = get_remote_imgs_list(list_limit=1000, offset=offset - 1)
+        if not new_list:
+            break
+        imgs_info += new_list
+
+    print("Data fetched.")
 
     for info in imgs_info:
         temp_data_dict["id"].append(info.get("_id"))
@@ -81,6 +91,7 @@ def generate_dataset_index():
 
         temp_data_dict["downloaded"] = False
 
+    print("Persisting in dataset_index.")
     df = pd.DataFrame(temp_data_dict)
     __persist_index(df, RAW_DATASET_INDEX_PATH)
 
@@ -124,7 +135,7 @@ def __read_img_data(img_path, resize_params):
 
 
 def get_img_path(img_name, dataset_folder=DATASET_RAW_IMGS_FOLDER):
-    return r"{}\{}.jpg".format(dataset_folder, img_name)
+    return r"{}/{}.jpg".format(dataset_folder, img_name)
 
 
 def get_img_data(
@@ -162,8 +173,11 @@ def get_img_data(
 
 
 def download_all_imgs():
+    print("Downloading all ISIC imgs")
     imgs_downloaded = 0
     dataset_index = read_dataset_index(RAW_DATASET_INDEX_PATH)
+
+    print("Index fetched")
 
     for index, row in dataset_index.iterrows():
         if row["downloaded"]:
@@ -178,6 +192,8 @@ def download_all_imgs():
         if imgs_downloaded % 100 == 0:
             print("%d imgs downloaded" % imgs_downloaded)
             __persist_index(dataset_index, RAW_DATASET_INDEX_PATH)
+
+    print("All images downloaded")
 
 
 def generate_classification_targets():
