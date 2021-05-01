@@ -348,6 +348,6 @@ def make_test_generator(target_col="is_malignant_melanoma", batch_size=50):
     return __get_dataset_pairs(ds, target_col, batch_size)
 
 
-def get_dataset_imgs_paths(dataset_index_path=TRAINING_DATASET_INDEX_PATH):
+def get_dataset_imgs_paths(dataset_index_path=RAW_DATASET_INDEX_PATH):
     ds = read_dataset_index(dataset_index_path)
     return ds["name"].map(lambda img_name: get_img_path(img_name=img_name)).tolist()
