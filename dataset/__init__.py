@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-DATASET_FOLDER = Path(r"./dataset")
-DATASET_RAW_IMGS_FOLDER = Path(r"./dataset/RAW_IMGS")
+DATASET_FOLDER = Path("dataset")
+DATASET_RAW_IMGS_FOLDER = DATASET_FOLDER.joinpath("RAW_IMGS")
 
 # Create utility folders if it doesn't exists
 TEMP_FOLDERS = [DATASET_RAW_IMGS_FOLDER]

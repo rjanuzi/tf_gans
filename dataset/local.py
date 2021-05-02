@@ -1,5 +1,6 @@
 import traceback
 from multiprocessing.dummy import Pool
+from pathlib import Path
 from random import shuffle
 
 import numpy as np
@@ -9,10 +10,13 @@ from PIL import Image
 from dataset import DATASET_FOLDER, DATASET_RAW_IMGS_FOLDER
 from dataset.remote import download_img, get_remote_imgs_list
 
-RAW_DATASET_INDEX_PATH = r"%s/dataset_index.csv" % DATASET_FOLDER
-TRAINING_DATASET_INDEX_PATH = r"%s/training_dataset_index.csv" % DATASET_FOLDER
-VALIDATION_DATASET_INDEX_PATH = r"%s/validation_dataset_index.csv" % DATASET_FOLDER
-TEST_DATASET_INDEX_PATH = r"%s/test_dataset_index.csv" % DATASET_FOLDER
+DATASET_FOLDER_PATH = Path(DATASET_FOLDER)
+RAW_DATASET_INDEX_PATH = DATASET_FOLDER_PATH.joinpath("dataset_index.csv")
+TRAINING_DATASET_INDEX_PATH = DATASET_FOLDER_PATH.joinpath("training_dataset_index.csv")
+VALIDATION_DATASET_INDEX_PATH = DATASET_FOLDER_PATH.joinpath(
+    "validation_dataset_index.csv"
+)
+TEST_DATASET_INDEX_PATH = DATASET_FOLDER_PATH.joinpath("test_dataset_index.csv")
 
 
 class NotInitiated(Exception):
@@ -135,7 +139,7 @@ def __read_img_data(img_path, resize_params):
 
 
 def get_img_path(img_name, dataset_folder=DATASET_RAW_IMGS_FOLDER):
-    return r"{}/{}.jpg".format(dataset_folder, img_name)
+    return dataset_folder.joinpath("{}.jpg".format(img_name))
 
 
 def get_img_data(
