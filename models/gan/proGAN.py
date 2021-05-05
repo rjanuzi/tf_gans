@@ -520,9 +520,9 @@ class ProGAN(Model):
             self.disc_optimizer.apply_gradients(zip(grads, self.D.trainable_weights))
 
         # Sample random points in the latent space
-        random_latent_vectors = tf.random.normal(
-            shape=(batch_size, self.latent_dim), mean=0, stddev=1
-        )
+        # random_latent_vectors = tf.random.normal(
+        #     shape=(batch_size, self.latent_dim), mean=0, stddev=1
+        # )
 
         # Assemble labels that say "all real images"
         is_real_labels = tf.zeros((batch_size, 1))
@@ -530,7 +530,8 @@ class ProGAN(Model):
 
         # Train the generator
         with tf.GradientTape() as tape:
-            predictions = self.D(self.G(random_latent_vectors))
+            # predictions = self.D(self.G(random_latent_vectors))
+            predictions = self.D(generated_images)
             g_loss = self.loss_fn(is_real_labels, predictions)
         grads = tape.gradient(g_loss, self.G.trainable_weights)
         self.gen_optimizer.apply_gradients(zip(grads, self.G.trainable_weights))
