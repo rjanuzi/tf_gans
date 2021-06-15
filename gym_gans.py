@@ -5,23 +5,25 @@ from time import time
 import numpy as np
 import tensorflow as tf
 from PIL import Image
-from tensorflow.keras import datasets, losses, optimizers
+from tensorflow.keras import datasets, optimizers
 
 from _telegram import send_img, send_simple_message
 from csv_util import read_csv, write_csv
 from dataset.local import get_dataset_imgs_paths
+from models.gan.custom_losses import wgan_d_loss, wgan_g_loss
 from models.gan.proGAN import ProGAN
 
 # Define some constants
 SEND_TELEGRAM = True
 
-EXPERIMENTS_INPUT = "progan_experiments_isic_target_128.csv"
+# EXPERIMENTS_INPUT = "progan_experiments_isic_target_128.csv"
 # EXPERIMENTS_INPUT = "progan_experiments_mnist_target_32.csv"
+EXPERIMENTS_INPUT = "progan_experiments_mnist_dev.csv"
 
 DATASET_FORCE_WIDTH = 600
 DATASET_FORCE_HEIGHT = 450
 
-DATASET_IMGS_LIMIT = 10000
+DATASET_IMGS_LIMIT = 100
 DATASET_PARAM_CACHE = True
 DATASET_PARAM_NORMALIZE = True
 
@@ -246,13 +248,14 @@ def run_proGAN_experiment(
         dataset_size=dataset_size,
         batch_size=batch_size,
         target_size=target_size,
-        disc_optimizer=optimizers.Adam(
+        d_optimizer=optimizers.Adam(
             learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8
         ),
-        gen_optimizer=optimizers.Adam(
+        g_optimizer=optimizers.Adam(
             learning_rate=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8
         ),
-        loss_fn=losses.BinaryCrossentropy(from_logits=True),
+        g_loss_fn=wgan_g_loss,
+        d_loss_fn=wgan_d_loss,
         epochs_to_fade_in=epochs_to_fade_in,
         epochs_to_stabilize=epochs_to_stabilize,
         callback_before_grow=before_grow_callback,

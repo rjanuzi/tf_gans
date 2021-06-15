@@ -1,11 +1,35 @@
+import functools
 import math
 
 import tensorflow as tf
-from tensorflow.keras import Model, backend, layers, models
+from tensorflow.keras import Model, layers
 
 
-def wasserstein_loss(y_true, y_pred):
-    return backend.mean(y_true * y_pred)
+def gradient_penalty(f, real, fake):
+    def _gradient_penalty(f, real, fake=None):
+        def _interpolate(a, b=None):
+            if b is None:  # interpolation in DRAGAN
+                beta = tf.random.uniform(shape=tf.shape(a), minval=0.0, maxval=1.0)
+                b = a + 0.5 * tf.math.reduce_std(a) * beta
+            shape = [tf.shape(a)[0]] + [1] * (a.shape.ndims - 1)
+            alpha = tf.random.uniform(shape=shape, minval=0.0, maxval=1.0)
+            inter = a + alpha * (b - a)
+            inter.set_shape(a.shape)
+            return inter
+
+        x = _interpolate(real, fake)
+        with tf.GradientTape() as t:
+            t.watch(x)
+            pred = f(x)
+        grad = t.gradient(pred, x)
+        norm = tf.norm(tf.reshape(grad, [tf.shape(grad)[0], -1]), axis=1)
+        gp = tf.reduce_mean((norm - 1.0) ** 2)
+
+        return gp
+
+    gp = _gradient_penalty(f, real, fake)
+
+    return gp
 
 
 def number_of_filters(blocks, fmap_base, fmap_max, fmap_decay):
@@ -408,8 +432,8 @@ class ProGAN(Model):
     G = None
     D = None
     latent_dim = None
-    disc_optimizer = None
-    gen_optimizer = None
+    d_optimizer = None
+    g_optimizer = None
     loss_fn = None
     fade_in_alpha = 1.0
     fading_in_block = False
@@ -417,6 +441,7 @@ class ProGAN(Model):
     current_output_size = 4
     steps = 0
     skipping_disc_training = True
+    d_updates_per_g_update = 1
 
     def __init__(
         self,
@@ -426,6 +451,7 @@ class ProGAN(Model):
         fmap_base=8192,
         fmap_max=512,
         fmap_decay=1.0,
+        d_updates_per_g_update=2,
     ):
         # assert 4*4*channels == latent_dim
 
@@ -444,12 +470,56 @@ class ProGAN(Model):
             fmap_decay=fmap_decay,
         )
         self.latent_dim = latent_dim
+        self.d_updates_per_g_update = d_updates_per_g_update
 
-    def compile(self, disc_optimizer, gen_optimizer, loss_fn):
+    def compile(self, d_optimizer, g_optimizer, g_loss_fn, d_loss_fn):
         super(ProGAN, self).compile()
-        self.disc_optimizer = disc_optimizer
-        self.gen_optimizer = gen_optimizer
-        self.loss_fn = loss_fn
+        self.d_optimizer = d_optimizer
+        self.g_optimizer = g_optimizer
+        self.g_loss_fn = g_loss_fn
+        self.d_loss_fn = d_loss_fn
+
+    def train_G(self, batch_size):
+        """
+        WGAN-GP's train step for Generator
+        """
+        with tf.GradientTape() as t:
+            z = tf.random.normal(shape=(batch_size, 1, 1, self.latent_dim))
+            x_fake = self.G(z, training=True)
+            x_fake_d_logit = self.D(x_fake, training=True)
+            G_loss = self.g_loss_fn(x_fake_d_logit)
+
+        G_grad = t.gradient(G_loss, self.G.trainable_variables)
+        self.g_optimizer.apply_gradients(zip(G_grad, self.G.trainable_variables))
+
+        return {"g_loss": G_loss}
+
+    def train_D(self, x_real, batch_size, gp_weight=10.0):
+        """
+        WGAN-GP's train step for Discriminator
+        """
+        with tf.GradientTape() as t:
+            z = tf.random.normal(shape=(batch_size, 1, 1, self.latent_dim))
+            x_fake = self.G(z, training=True)
+
+            x_real_d_logit = self.D(x_real, training=True)
+            x_fake_d_logit = self.D(x_fake, training=True)
+
+            x_real_d_loss, x_fake_d_loss = self.d_loss_fn(
+                x_real_d_logit, x_fake_d_logit
+            )
+            gp = gradient_penalty(
+                functools.partial(self.D, training=True), x_real, x_fake
+            )
+
+            D_loss = (
+                x_real_d_loss + x_fake_d_loss
+            ) + gp * gp_weight  # Default GP Weight = 10.0
+
+        D_grad = t.gradient(D_loss, self.D.trainable_variables)
+        self.d_optimizer.apply_gradients(zip(D_grad, self.D.trainable_variables))
+
+        return {"d_loss": x_real_d_loss + x_fake_d_loss, "gp": gp}
 
     def train_step(self, real_images):
         """
@@ -477,64 +547,74 @@ class ProGAN(Model):
 
         # Sample random points in the latent space
         batch_size = tf.shape(real_images)[0]
-        random_latent_vectors = tf.random.normal(
-            shape=(batch_size, self.latent_dim), mean=0, stddev=1
-        )
 
-        # Decode them to fake images
-        generated_images = self.G(random_latent_vectors)
+        # Train D
+        D_loss_dict = self.train_D(real_images, batch_size=batch_size)
 
-        # Combine them with real images
-        combined_images = tf.concat([generated_images, real_images], axis=0)
+        # Train G
+        # Skip G trainings
+        # if self.d_optimizer.iterations.numpy() % self.d_updates_per_g_update == 0:
+        #     G_loss_dict = self.train_G(batch_size=batch_size)
+        G_loss_dict = self.train_G(batch_size=batch_size)
 
-        # Assemble labels discriminating real from fake images
-        labels = tf.concat(
-            [tf.ones((batch_size, 1)), tf.zeros((batch_size, 1))],
-            axis=0
-            # [tf.ones((batch_size, 1)), tf.ones((batch_size, 1))*(-1)], axis=0
-        )
-
-        # Add random noise to the labels - important trick!
-        # labels += 0.05 * tf.random.uniform(tf.shape(labels))
-
-        # Train the discriminator
-        # if tf.constant(not self.skipping_disc_training, dtype=tf.bool):
-        if self.skipping_disc_training:
-            # Train more the generator than the discriminator
-            with tf.GradientTape() as tape:
-                predictions = self.D(combined_images)
-                d_loss = self.loss_fn(labels, predictions)
-            if self.steps >= 2:
-                self.steps = 0
-                grads = tape.gradient(d_loss, self.D.trainable_weights)
-                self.disc_optimizer.apply_gradients(
-                    zip(grads, self.D.trainable_weights)
-                )
-            else:
-                self.steps += 1
-        else:
-            with tf.GradientTape() as tape:
-                predictions = self.D(combined_images)
-                d_loss = self.loss_fn(labels, predictions)
-            grads = tape.gradient(d_loss, self.D.trainable_weights)
-            self.disc_optimizer.apply_gradients(zip(grads, self.D.trainable_weights))
-
-        # Sample random points in the latent space
         # random_latent_vectors = tf.random.normal(
         #     shape=(batch_size, self.latent_dim), mean=0, stddev=1
         # )
 
-        # Assemble labels that say "all real images"
-        is_real_labels = tf.zeros((batch_size, 1))
-        # is_real_labels = tf.ones((batch_size, 1))*(-1)
+        # # Decode them to fake images
+        # generated_images = self.G(random_latent_vectors)
 
-        # Train the generator
-        with tf.GradientTape() as tape:
-            # predictions = self.D(self.G(random_latent_vectors))
-            predictions = self.D(generated_images)
-            g_loss = self.loss_fn(is_real_labels, predictions)
-        grads = tape.gradient(g_loss, self.G.trainable_weights)
-        self.gen_optimizer.apply_gradients(zip(grads, self.G.trainable_weights))
+        # # Combine them with real images
+        # combined_images = tf.concat([generated_images, real_images], axis=0)
+
+        # # Assemble labels discriminating real from fake images
+        # labels = tf.concat(
+        #     [tf.ones((batch_size, 1)), tf.zeros((batch_size, 1))],
+        #     axis=0
+        #     # [tf.ones((batch_size, 1)), tf.ones((batch_size, 1))*(-1)], axis=0
+        # )
+
+        # # Add random noise to the labels - important trick!
+        # # labels += 0.05 * tf.random.uniform(tf.shape(labels))
+
+        # # Train the discriminator
+        # # if tf.constant(not self.skipping_disc_training, dtype=tf.bool):
+        # if self.skipping_disc_training:
+        #     # Train more the generator than the discriminator
+        #     with tf.GradientTape() as tape:
+        #         predictions = self.D(combined_images)
+        #         d_loss = self.loss_fn(labels, predictions)
+        #     if self.steps >= 2:
+        #         self.steps = 0
+        #         grads = tape.gradient(d_loss, self.D.trainable_weights)
+        #         self.d_optimizer.apply_gradients(
+        #             zip(grads, self.D.trainable_weights)
+        #         )
+        #     else:
+        #         self.steps += 1
+        # else:
+        #     with tf.GradientTape() as tape:
+        #         predictions = self.D(combined_images)
+        #         d_loss = self.loss_fn(labels, predictions)
+        #     grads = tape.gradient(d_loss, self.D.trainable_weights)
+        #     self.d_optimizer.apply_gradients(zip(grads, self.D.trainable_weights))
+
+        # # Sample random points in the latent space
+        # # random_latent_vectors = tf.random.normal(
+        # #     shape=(batch_size, self.latent_dim), mean=0, stddev=1
+        # # )
+
+        # # Assemble labels that say "all real images"
+        # is_real_labels = tf.zeros((batch_size, 1))
+        # # is_real_labels = tf.ones((batch_size, 1))*(-1)
+
+        # # Train the generator
+        # with tf.GradientTape() as tape:
+        #     # predictions = self.D(self.G(random_latent_vectors))
+        #     predictions = self.D(generated_images)
+        #     g_loss = self.loss_fn(is_real_labels, predictions)
+        # grads = tape.gradient(g_loss, self.G.trainable_weights)
+        # self.g_optimizer.apply_gradients(zip(grads, self.G.trainable_weights))
 
         # Train more the discriminator than the generator
         # with tf.GradientTape() as tape:
@@ -543,11 +623,14 @@ class ProGAN(Model):
         # if self.steps == 10:
         #     self.steps = 0
         #     grads = tape.gradient(g_loss, self.G.trainable_weights)
-        #     self.gen_optimizer.apply_gradients(zip(grads, self.G.trainable_weights))
+        #     self.g_optimizer.apply_gradients(zip(grads, self.G.trainable_weights))
         # else:
         #     self.steps += 1
 
-        return {"d_loss": d_loss, "g_loss": g_loss}
+        losses_dict = D_loss_dict
+        losses_dict.update(G_loss_dict)
+
+        return losses_dict
 
     def grow(self):
         """
@@ -564,9 +647,10 @@ class ProGAN(Model):
         dataset_size,
         batch_size,
         target_size,
-        disc_optimizer,
-        gen_optimizer,
-        loss_fn,
+        d_optimizer,
+        g_optimizer,
+        g_loss_fn,
+        d_loss_fn,
         epochs_to_fade_in,
         epochs_to_stabilize,
         callback_before_grow=None,
@@ -581,7 +665,10 @@ class ProGAN(Model):
         epochs = epochs_to_fade_in + epochs_to_stabilize
 
         self.compile(
-            disc_optimizer=disc_optimizer, gen_optimizer=gen_optimizer, loss_fn=loss_fn
+            d_optimizer=d_optimizer,
+            g_optimizer=g_optimizer,
+            g_loss_fn=g_loss_fn,
+            d_loss_fn=d_loss_fn,
         )
 
         self.current_output_size = 4  # Start size
@@ -612,9 +699,10 @@ class ProGAN(Model):
 
             # Re-compile the models to recalculate the execution graph (We  add new layers when grow the network)
             self.compile(
-                disc_optimizer=disc_optimizer,
-                gen_optimizer=gen_optimizer,
-                loss_fn=loss_fn,
+                d_optimizer=d_optimizer,
+                g_optimizer=g_optimizer,
+                g_loss_fn=g_loss_fn,
+                d_loss_fn=d_loss_fn,
             )
 
     def generate(self, noises):
