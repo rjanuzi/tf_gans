@@ -7,10 +7,7 @@ from tensorflow.keras import Model, layers
 
 def gradient_penalty(f, real, fake):
     def _gradient_penalty(f, real, fake=None):
-        def _interpolate(a, b=None):
-            if b is None:  # interpolation in DRAGAN
-                beta = tf.random.uniform(shape=tf.shape(a), minval=0.0, maxval=1.0)
-                b = a + 0.5 * tf.math.reduce_std(a) * beta
+        def _interpolate(a, b):
             shape = [tf.shape(a)[0]] + [1] * (a.shape.ndims - 1)
             alpha = tf.random.uniform(shape=shape, minval=0.0, maxval=1.0)
             inter = a + alpha * (b - a)
