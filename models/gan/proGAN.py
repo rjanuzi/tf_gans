@@ -283,18 +283,29 @@ class Discriminator(Model):
             padding="same",
             activation=layers.LeakyReLU(alpha=0.2),
         )
-        self.dense_1 = layers.Dense(
-            units=filters_count, activation=layers.LeakyReLU(alpha=0.2)
+
+        self.conv_2 = layers.Conv2D(
+            filters=filters_count,
+            kernel_size=4,
+            strides=1,
+            padding="same",
+            activation=layers.LeakyReLU(alpha=0.2),
         )
-        self.output_faltten = layers.Flatten()
-        self.dense_2 = layers.Dense(units=1)  # Output layer
+
+        # self.dense_1 = layers.Dense(
+        #     units=filters_count, activation=layers.LeakyReLU(alpha=0.2)
+        # )
+        # self.output_faltten = layers.Flatten()
+
+        self.dense_1 = layers.Dense(units=1)  # Output layer
 
         # This block is static
         self.discriminator_block = [
             self.conv_1,
+            self.conv_2,
             self.dense_1,
-            self.output_faltten,
-            self.dense_2,
+            # self.output_faltten,
+            # self.dense_2,
         ]
 
         # Helper list to the caller
