@@ -4,4 +4,6 @@ saved_models
 logs/*
 *__pycache__
 proGAN_*_runs*
+vanilla_gan_*_runs*
 progan_experiments*.csv
+_telegram_config.json

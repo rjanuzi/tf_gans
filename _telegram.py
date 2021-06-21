@@ -3,26 +3,38 @@ import logging
 import traceback
 
 from telegram import Bot, InputFile, ParseMode
-from telegram.error import NetworkError
 
-_TELEGRAM_BOT_KEY = "1754067352:AAHgzr2qSoT7mqkGUw0nT01B2KM3ISHSTkE"  # rjanuzi_bot
-_TELEGRAM_CHAT_ID = "-436350789"
+__TELEGRAM_CONFIG_FILE = "_telegram_config.json"
+
+_TELEGRAM_CONFIG = None
+try:
+    with open(__TELEGRAM_CONFIG_FILE, "r") as f:
+        _TELEGRAM_CONFIG = json.load(f)
+except:
+    logging.warning("No telegram configuration found!")
 
 
-def send_simple_message(text, bot_key=_TELEGRAM_BOT_KEY, chat_id=_TELEGRAM_CHAT_ID):
-    try:
-        result = Bot(token=bot_key).send_message(
-            chat_id=chat_id, text=text, parse_mode=ParseMode.HTML
-        )
-        return True, result
-    except:
-        logging.error(traceback.format_exc())
-        return False, traceback.format_exc()
+def send_simple_message(
+    text,
+    bot_key=_TELEGRAM_CONFIG.get("bot_key"),
+    chat_id=_TELEGRAM_CONFIG.get("chat_id"),
+):
+    if bot_key != None and chat_id != None:
+        try:
+            result = Bot(token=bot_key).send_message(
+                chat_id=chat_id, text=text, parse_mode=ParseMode.HTML
+            )
+            return True, result
+        except:
+            logging.error(traceback.format_exc())
+            return False, traceback.format_exc()
+    else:
+        return True, None
 
 
 def send_img(
-    bot_key=_TELEGRAM_BOT_KEY,
-    chat_id=_TELEGRAM_CHAT_ID,
+    bot_key=_TELEGRAM_CONFIG.get("bot_key"),
+    chat_id=_TELEGRAM_CONFIG.get("chat_id"),
     img_path=None,
     img_binary=None,
     caption="",
@@ -42,7 +54,10 @@ def send_img(
 
 
 def send_document(
-    document_path, bot_key=_TELEGRAM_BOT_KEY, chat_id=_TELEGRAM_CHAT_ID, caption=""
+    document_path,
+    bot_key=_TELEGRAM_CONFIG.get("bot_key"),
+    chat_id=_TELEGRAM_CONFIG.get("chat_id"),
+    caption="",
 ):
     try:
         result = Bot(token=bot_key).send_document(
@@ -56,7 +71,7 @@ def send_document(
         return False, traceback.format_exc()
 
 
-def get_messages(bot_key):
+def get_messages(bot_key=_TELEGRAM_CONFIG.get("bot_key")):
     # Get offset
     try:
         offset_file = open(r"telegram_messages_offset.json", "r")
