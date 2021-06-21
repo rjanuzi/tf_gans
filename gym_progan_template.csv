@@ -1,1 +1,2 @@
 id,dataset_name,imgs_limit,channels,batch_size,latent_dim,target_size,epochs_to_fade_in,epochs_to_stabilize,fmap_base,fmap_max,fmap_decay,start_time,end_time,total_time_s,g_loss,d_loss,results_folder
+1,mnist,0,1,32,64,32,5,5,32,32,1,,,,,,

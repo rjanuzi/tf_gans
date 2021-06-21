@@ -10,8 +10,7 @@ from tensorflow.keras import datasets, optimizers
 from _telegram import send_img, send_simple_message
 from csv_util import read_csv, write_csv
 from dataset.local import get_dataset_imgs_paths
-from models.gan.custom_losses import wgan_d_loss, wgan_g_loss
-from models.gan.proGAN import ProGAN
+from models.gan.proGAN import ProGAN, wgan_d_loss, wgan_g_loss
 
 # Define some constants
 SEND_TELEGRAM = True
