@@ -6,13 +6,15 @@ import numpy as np
 import tensorflow as tf
 from PIL import Image
 from tensorflow.keras import datasets, optimizers
+from tensorflow.keras.activations import relu, sigmoid
+from tensorflow.python.keras.backend import sigmoid
 
 from _telegram import send_img, send_simple_message
 from models.gan.vanilla import VanillaGAN, d_loss_fn, g_loss_fn
 
 SEND_TELEGRAM = True
-EPOCHS = 100
-LATENT_DIM = 128
+EPOCHS = 10
+LATENT_DIM = 256
 TARGET_IMG_SIZE = 28
 MNIST_IMG_SIZE = 28
 CHANNELS = 1
@@ -138,7 +140,14 @@ if SEND_TELEGRAM:
 
 # Instantiate a fresh new model and compile
 vanilla_gan = VanillaGAN(
-    target_img_size=TARGET_IMG_SIZE, channels=CHANNELS, latent_dim=LATENT_DIM, k=K
+    target_img_size=TARGET_IMG_SIZE,
+    channels=CHANNELS,
+    latent_dim=LATENT_DIM,
+    k=K,
+    g_layers_units=[128, 256, 256],
+    g_layers_activations=[relu, relu, sigmoid],
+    d_layers_units=[128, 256, 256],
+    d_layers_activations=[relu, relu, relu],
 )
 vanilla_gan.compile(
     d_optimizer=optimizers.Adam(

@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import Model
+from tensorflow.keras import activations
 from tensorflow.keras.activations import relu, sigmoid
 from tensorflow.keras.layers import Dense, Flatten
 
@@ -58,7 +59,7 @@ class Generator(Model):
         layers_units=[128, 128],
         activations=[relu, sigmoid],
     ):
-        super().__init__()
+        super(Generator, self).__init__()
 
         # Register basic info
         self.target_img_size = target_img_size
@@ -105,7 +106,7 @@ class Discriminator(Model):
     output_layer = None
 
     def __init__(self, layers_units=[128, 128], activations=[relu, relu]):
-        super().__init__()
+        super(Discriminator, self).__init__()
         self.layers_units = layers_units
         self.activations = activations
         self.layers_count = len(layers_units)
@@ -155,8 +156,9 @@ class VanillaGAN(Model):
         g_layers_units=[128, 128],
         g_layers_activations=[relu, sigmoid],
         d_layers_units=[128, 128],
+        d_layers_activations=[relu, relu],
     ):
-        super().__init__()
+        super(VanillaGAN, self).__init__()
         self.target_img_size = target_img_size
         self.channels = channels
         self.latent_dim = latent_dim
@@ -164,13 +166,16 @@ class VanillaGAN(Model):
         self.g_layers_units = g_layers_units
         self.g_layers_activations = g_layers_activations
         self.d_layers_units = d_layers_units
+        self.d_layers_activations = d_layers_activations
         self.G = Generator(
             target_img_size=self.target_img_size,
             channels=self.channels,
             layers_units=self.g_layers_units,
             activations=self.g_layers_activations,
         )
-        self.D = Discriminator(layers_units=d_layers_units)
+        self.D = Discriminator(
+            layers_units=self.d_layers_units, activations=self.d_layers_activations
+        )
 
     def compile(self, g_optimizer, d_optimizer, g_loss_fn, d_loss_fn):
         super(VanillaGAN, self).compile()
